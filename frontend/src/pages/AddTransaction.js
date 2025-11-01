@@ -6,11 +6,14 @@ function AddTransaction({ user, transactions, fetchTransactions }) {
   const [store, setStore] = useState("");
   const [amount, setAmount] = useState("");
   const [description, setDescription] = useState("");
+  const [transactionDate, setTransactionDate] = useState(
+    new Date().toISOString().split("T")[0]
+  ); // Default to today
 
   // Add transaction
   const addTransaction = async () => {
-    if (!category || !amount) {
-      alert("Please fill in category and amount");
+    if (!category || !amount || !transactionDate) {
+      alert("Please fill in category, amount, and date");
       return;
     }
 
@@ -24,21 +27,26 @@ function AddTransaction({ user, transactions, fetchTransactions }) {
           store,
           amount: parseFloat(amount),
           description,
+          transaction_date: transactionDate,
           user_id: user.id,
         }),
       });
-      if (!res.ok) throw new Error("Error adding transaction");
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.detail || "Error adding transaction");
+      }
       await res.json();
       alert("Transaction added!");
       fetchTransactions();
-      // Clear form
+      // Clear form except date
       setCategory("");
       setAmount("");
       setDescription("");
       setStore("");
+      // Keep the date for convenience
     } catch (err) {
       console.error(err);
-      alert("Error adding transaction");
+      alert(`Error adding transaction: ${err.message}`);
     }
   };
 
@@ -48,8 +56,8 @@ function AddTransaction({ user, transactions, fetchTransactions }) {
     oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
 
     return transactions
-      .filter((t) => new Date(t.date) >= oneWeekAgo)
-      .sort((a, b) => new Date(b.date) - new Date(a.date));
+      .filter((t) => new Date(t.transaction_date) >= oneWeekAgo)
+      .sort((a, b) => new Date(b.transaction_date) - new Date(a.transaction_date));
   };
 
   const lastWeekTransactions = getLastWeekTransactions();
@@ -124,6 +132,15 @@ function AddTransaction({ user, transactions, fetchTransactions }) {
             </select>
           </div>
           <div style={inputRowStyle}>
+            <label style={labelStyle}>Transaction Date *</label>
+            <input
+              type="date"
+              value={transactionDate}
+              onChange={(e) => setTransactionDate(e.target.value)}
+              style={inputStyle}
+            />
+          </div>
+          <div style={inputRowStyle}>
             <label style={labelStyle}>Category *</label>
             <input
               type="text"
@@ -194,7 +211,7 @@ function AddTransaction({ user, transactions, fetchTransactions }) {
                       {t.type === "income" ? "➕" : "➖"} ${t.amount.toFixed(2)}
                     </strong>
                     <span style={{ fontSize: "12px", color: "#999" }}>
-                      {new Date(t.date).toLocaleDateString()}
+                      {new Date(t.transaction_date).toLocaleDateString()}
                     </span>
                   </div>
                   <div style={{ color: "#555" }}>

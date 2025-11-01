@@ -11,16 +11,16 @@ function ViewTransactions({ transactions }) {
   const [minAmount, setMinAmount] = useState("");
   const [maxAmount, setMaxAmount] = useState("");
 
-  // Get unique categories and stores for filter dropdowns
+  // Get unique categories and stores
   const uniqueCategories = [...new Set(transactions.map((t) => t.category))].sort();
   const uniqueStores = [...new Set(transactions.map((t) => t.store).filter(Boolean))].sort();
 
-  // Get min and max amounts for the slider
+  // Get min and max amounts
   const amounts = transactions.map((t) => t.amount);
   const globalMinAmount = amounts.length > 0 ? Math.min(...amounts) : 0;
   const globalMaxAmount = amounts.length > 0 ? Math.max(...amounts) : 1000;
 
-  // Filter transactions based on all filters
+  // Filter transactions - FIXED date filtering
   const filteredTransactions = useMemo(() => {
     return transactions.filter((t) => {
       // Type filter
@@ -40,9 +40,21 @@ function ViewTransactions({ transactions }) {
         return false;
       }
 
-      // Date range filter
-      if (startDate && new Date(t.date) < new Date(startDate)) return false;
-      if (endDate && new Date(t.date) > new Date(endDate)) return false;
+      // Date range filter - FIXED
+      const transactionDate = new Date(t.transaction_date);
+      if (startDate) {
+        const startDateObj = new Date(startDate);
+        startDateObj.setHours(0, 0, 0, 0);
+        transactionDate.setHours(0, 0, 0, 0);
+        if (transactionDate < startDateObj) return false;
+      }
+      if (endDate) {
+        const endDateObj = new Date(endDate);
+        endDateObj.setHours(23, 59, 59, 999);
+        const checkDate = new Date(t.transaction_date);
+        checkDate.setHours(0, 0, 0, 0);
+        if (checkDate > endDateObj) return false;
+      }
 
       // Amount range filter
       if (minAmount && t.amount < parseFloat(minAmount)) return false;
@@ -182,7 +194,6 @@ function ViewTransactions({ transactions }) {
         </div>
 
         <div style={filtersGridStyle}>
-          {/* Type filter */}
           <div style={filterItemStyle}>
             <label style={labelStyle}>Type</label>
             <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} style={inputStyle}>
@@ -192,7 +203,6 @@ function ViewTransactions({ transactions }) {
             </select>
           </div>
 
-          {/* Category filter */}
           <div style={filterItemStyle}>
             <label style={labelStyle}>Category</label>
             <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} style={inputStyle}>
@@ -205,7 +215,6 @@ function ViewTransactions({ transactions }) {
             </select>
           </div>
 
-          {/* Store filter */}
           <div style={filterItemStyle}>
             <label style={labelStyle}>Store</label>
             <select value={storeFilter} onChange={(e) => setStoreFilter(e.target.value)} style={inputStyle}>
@@ -218,7 +227,6 @@ function ViewTransactions({ transactions }) {
             </select>
           </div>
 
-          {/* Description search */}
           <div style={filterItemStyle}>
             <label style={labelStyle}>Description Search</label>
             <input
@@ -230,7 +238,6 @@ function ViewTransactions({ transactions }) {
             />
           </div>
 
-          {/* Start date */}
           <div style={filterItemStyle}>
             <label style={labelStyle}>Start Date</label>
             <input
@@ -241,7 +248,6 @@ function ViewTransactions({ transactions }) {
             />
           </div>
 
-          {/* End date */}
           <div style={filterItemStyle}>
             <label style={labelStyle}>End Date</label>
             <input
@@ -252,7 +258,6 @@ function ViewTransactions({ transactions }) {
             />
           </div>
 
-          {/* Min amount */}
           <div style={filterItemStyle}>
             <label style={labelStyle}>Min Amount</label>
             <input
@@ -265,7 +270,6 @@ function ViewTransactions({ transactions }) {
             />
           </div>
 
-          {/* Max amount */}
           <div style={filterItemStyle}>
             <label style={labelStyle}>Max Amount</label>
             <input
@@ -330,7 +334,7 @@ function ViewTransactions({ transactions }) {
             </p>
           ) : (
             filteredTransactions
-              .sort((a, b) => new Date(b.date) - new Date(a.date))
+              .sort((a, b) => new Date(b.transaction_date) - new Date(a.transaction_date))
               .map((t) => (
                 <div key={t.id} style={transactionItemStyle}>
                   <div
@@ -359,7 +363,7 @@ function ViewTransactions({ transactions }) {
                       </span>
                     </div>
                     <span style={{ fontSize: "14px", color: "#999" }}>
-                      {new Date(t.date).toLocaleDateString("en-US", {
+                      {new Date(t.transaction_date).toLocaleDateString("en-US", {
                         year: "numeric",
                         month: "short",
                         day: "numeric",

@@ -5,37 +5,72 @@ function Login({ setUser }) {
   const [email, setEmail] = useState("");
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
   // Handle signup (create new user)
   const handleSignup = async () => {
+    // Clear previous errors
+    setError("");
+    
+    // Validation
     if (!email || !firstName || !lastName) {
-      alert("Please fill in all fields");
+      setError("Please fill in all fields");
       return;
     }
+
+    setLoading(true);
+    
     try {
+      console.log("Attempting to create user with:", { first_name: firstName, last_name: lastName, email });
+      
       const res = await fetch("/users/", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ first_name: firstName, last_name: lastName, email }),
+        body: JSON.stringify({ 
+          first_name: firstName, 
+          last_name: lastName, 
+          email 
+        }),
       });
-      if (!res.ok) throw new Error("Error creating user");
-      const data = await res.json();
+
+      console.log("Response status:", res.status);
+      
+      // Try to get the response body regardless of status
+      const data = await res.json().catch(() => null);
+      console.log("Response data:", data);
+
+      if (!res.ok) {
+        // Show the actual error message from the backend
+        const errorMessage = data?.detail || `Server error: ${res.status}`;
+        setError(errorMessage);
+        console.error("Signup failed:", errorMessage);
+        return;
+      }
+
+      // Success!
+      console.log("User created successfully:", data);
       setUser(data);
       alert("Account created successfully!");
+      
     } catch (err) {
-      console.error(err);
-      alert("Error creating user (email may already exist).");
+      console.error("Network or parsing error:", err);
+      setError(`Network error: ${err.message}. Is the backend server running on port 8000?`);
+    } finally {
+      setLoading(false);
     }
   };
 
   // Handle login (mock - in production you'd authenticate)
   const handleLogin = async () => {
+    setError("");
+    
     if (!email) {
-      alert("Please enter your email");
+      setError("Please enter your email");
       return;
     }
+    
     // For now, we'll just fetch the user by email (not secure, but works for MVP)
-    // In production, you'd have proper authentication
     alert("Login functionality coming soon! For now, please use signup.");
   };
 
@@ -69,13 +104,13 @@ function Login({ setUser }) {
   const buttonStyle = {
     width: "100%",
     padding: "12px",
-    backgroundColor: "#4CAF50",
+    backgroundColor: loading ? "#ccc" : "#4CAF50",
     color: "white",
     border: "none",
     borderRadius: "5px",
     fontSize: "16px",
     fontWeight: "bold",
-    cursor: "pointer",
+    cursor: loading ? "not-allowed" : "pointer",
     marginTop: "10px",
   };
 
@@ -86,12 +121,28 @@ function Login({ setUser }) {
     fontSize: "14px",
   };
 
+  const errorStyle = {
+    backgroundColor: "#ffebee",
+    color: "#c62828",
+    padding: "12px",
+    borderRadius: "5px",
+    marginBottom: "15px",
+    fontSize: "14px",
+    border: "1px solid #ef9a9a",
+  };
+
   return (
     <div style={containerStyle}>
       <div style={cardStyle}>
         <h2 style={{ textAlign: "center", color: "#1a1a2e", marginBottom: "30px" }}>
           💰 Personal Finance App
         </h2>
+
+        {error && (
+          <div style={errorStyle}>
+            <strong>Error:</strong> {error}
+          </div>
+        )}
 
         {isSignup ? (
           <>
@@ -102,6 +153,7 @@ function Login({ setUser }) {
               value={firstName}
               onChange={(e) => setFirstName(e.target.value)}
               style={inputStyle}
+              disabled={loading}
             />
             <input
               type="text"
@@ -109,6 +161,7 @@ function Login({ setUser }) {
               value={lastName}
               onChange={(e) => setLastName(e.target.value)}
               style={inputStyle}
+              disabled={loading}
             />
             <input
               type="email"
@@ -116,15 +169,23 @@ function Login({ setUser }) {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               style={inputStyle}
+              disabled={loading}
             />
-            <button onClick={handleSignup} style={buttonStyle}>
-              Sign Up
+            <button 
+              onClick={handleSignup} 
+              style={buttonStyle}
+              disabled={loading}
+            >
+              {loading ? "Creating Account..." : "Sign Up"}
             </button>
             <div style={linkStyle}>
               Already have an account?{" "}
               <span
                 style={{ color: "#4CAF50", cursor: "pointer", fontWeight: "bold" }}
-                onClick={() => setIsSignup(false)}
+                onClick={() => {
+                  setIsSignup(false);
+                  setError("");
+                }}
               >
                 Login
               </span>
@@ -152,13 +213,22 @@ function Login({ setUser }) {
               Don't have an account?{" "}
               <span
                 style={{ color: "#4CAF50", cursor: "pointer", fontWeight: "bold" }}
-                onClick={() => setIsSignup(true)}
+                onClick={() => {
+                  setIsSignup(true);
+                  setError("");
+                }}
               >
                 Sign Up
               </span>
             </div>
           </>
         )}
+        
+        <div style={{ marginTop: "20px", padding: "10px", backgroundColor: "#f5f5f5", borderRadius: "5px", fontSize: "12px", color: "#666" }}>
+          <strong>Debug Info:</strong>
+          <br />Backend should be running at: http://localhost:8000
+          <br />Check browser console (F12) for detailed error logs
+        </div>
       </div>
     </div>
   );

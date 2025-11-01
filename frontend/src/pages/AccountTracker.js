@@ -1,84 +1,149 @@
-import React, { useMemo } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 
-function AccountTracker({ user, transactions }) {
-  // Calculate overall account metrics
-  const accountMetrics = useMemo(() => {
-    const totalIncome = transactions
-      .filter((t) => t.type === "income")
-      .reduce((sum, t) => sum + t.amount, 0);
-    const totalExpenses = transactions
-      .filter((t) => t.type === "expense")
-      .reduce((sum, t) => sum + t.amount, 0);
-    const currentBalance = totalIncome - totalExpenses;
+function AccountTracker({ user }) {
+  const [accounts, setAccounts] = useState([]);
+  const [accountName, setAccountName] = useState("");
+  const [accountType, setAccountType] = useState("liquid");
+  const [balance, setBalance] = useState("");
+  const [loading, setLoading] = useState(false);
 
-    // Get this month's data
-    const now = new Date();
-    const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    const thisMonthTransactions = transactions.filter(
-      (t) => new Date(t.date) >= thisMonthStart
-    );
-    const thisMonthIncome = thisMonthTransactions
-      .filter((t) => t.type === "income")
-      .reduce((sum, t) => sum + t.amount, 0);
-    const thisMonthExpenses = thisMonthTransactions
-      .filter((t) => t.type === "expense")
-      .reduce((sum, t) => sum + t.amount, 0);
+  // Fetch all account records
+  const fetchAccounts = async () => {
+    try {
+      const res = await fetch(`/accounts/user/${user.id}`);
+      if (!res.ok) throw new Error("Failed to fetch accounts");
+      const data = await res.json();
+      setAccounts(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error(err);
+      setAccounts([]);
+    }
+  };
 
-    // Get last month's data
-    const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
-    const lastMonthTransactions = transactions.filter((t) => {
-      const date = new Date(t.date);
-      return date >= lastMonthStart && date <= lastMonthEnd;
-    });
-    const lastMonthExpenses = lastMonthTransactions
-      .filter((t) => t.type === "expense")
-      .reduce((sum, t) => sum + t.amount, 0);
+  useEffect(() => {
+    if (user) fetchAccounts();
+  }, [user]);
 
-    // Calculate percentage change
-    const expenseChange =
-      lastMonthExpenses > 0
-        ? ((thisMonthExpenses - lastMonthExpenses) / lastMonthExpenses) * 100
-        : 0;
+  // Add account balance
+  const addAccount = async () => {
+    if (!accountName || !balance) {
+      alert("Please fill in account name and balance");
+      return;
+    }
 
-    return {
-      currentBalance,
-      totalIncome,
-      totalExpenses,
-      thisMonthIncome,
-      thisMonthExpenses,
-      thisMonthBalance: thisMonthIncome - thisMonthExpenses,
-      expenseChange,
-      transactionCount: transactions.length,
-    };
-  }, [transactions]);
-
-  // Get recent transactions
-  const recentTransactions = useMemo(() => {
-    return transactions
-      .sort((a, b) => new Date(b.date) - new Date(a.date))
-      .slice(0, 5);
-  }, [transactions]);
-
-  // Calculate category breakdown
-  const categoryBreakdown = useMemo(() => {
-    const categories = {};
-    transactions
-      .filter((t) => t.type === "expense")
-      .forEach((t) => {
-        categories[t.category] = (categories[t.category] || 0) + t.amount;
+    setLoading(true);
+    try {
+      const res = await fetch("/accounts/", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: accountName,
+          account_type: accountType,
+          balance: parseFloat(balance),
+          user_id: user.id,
+        }),
       });
-    return Object.entries(categories)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 5);
-  }, [transactions]);
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.detail || "Error adding account");
+      }
+      await res.json();
+      alert("Account balance recorded!");
+      fetchAccounts();
+      setAccountName("");
+      setBalance("");
+    } catch (err) {
+      console.error(err);
+      alert(`Error adding account: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Get latest balance for each unique account
+  const latestAccounts = useMemo(() => {
+    const accountMap = {};
+    // Sort by date descending, then group by name+type
+    accounts
+      .sort((a, b) => new Date(b.date_recorded) - new Date(a.date_recorded))
+      .forEach((account) => {
+        const key = `${account.name}_${account.account_type}`;
+        if (!accountMap[key]) {
+          accountMap[key] = account;
+        }
+      });
+    return Object.values(accountMap);
+  }, [accounts]);
+
+  // Calculate net worth
+  const netWorth = useMemo(() => {
+    const assets = latestAccounts
+      .filter((a) => a.account_type === "liquid" || a.account_type === "investment")
+      .reduce((sum, a) => sum + a.balance, 0);
+    const debts = latestAccounts
+      .filter((a) => a.account_type === "debt")
+      .reduce((sum, a) => sum + a.balance, 0);
+    return assets - debts;
+  }, [latestAccounts]);
+
+  // Group accounts by type
+  const accountsByType = useMemo(() => {
+    return {
+      liquid: latestAccounts.filter((a) => a.account_type === "liquid"),
+      investment: latestAccounts.filter((a) => a.account_type === "investment"),
+      debt: latestAccounts.filter((a) => a.account_type === "debt"),
+    };
+  }, [latestAccounts]);
+
+  // Net worth history (all records over time)
+  const netWorthHistory = useMemo(() => {
+    // Group all records by date
+    const dateGroups = {};
+    accounts.forEach((account) => {
+      const date = new Date(account.date_recorded).toISOString().split("T")[0];
+      if (!dateGroups[date]) {
+        dateGroups[date] = [];
+      }
+      dateGroups[date].push(account);
+    });
+
+    // Calculate net worth for each date
+    return Object.entries(dateGroups)
+      .map(([date, accts]) => {
+        // Get most recent balance for each account on this date
+        const accountMap = {};
+        accts.forEach((a) => {
+          const key = `${a.name}_${a.account_type}`;
+          if (
+            !accountMap[key] ||
+            new Date(a.date_recorded) > new Date(accountMap[key].date_recorded)
+          ) {
+            accountMap[key] = a;
+          }
+        });
+
+        const dayAccounts = Object.values(accountMap);
+        const assets = dayAccounts
+          .filter((a) => a.account_type === "liquid" || a.account_type === "investment")
+          .reduce((sum, a) => sum + a.balance, 0);
+        const debts = dayAccounts
+          .filter((a) => a.account_type === "debt")
+          .reduce((sum, a) => sum + a.balance, 0);
+
+        return {
+          date,
+          netWorth: assets - debts,
+          assets,
+          debts,
+        };
+      })
+      .sort((a, b) => a.date.localeCompare(b.date))
+      .slice(-10); // Last 10 entries
+  }, [accounts]);
 
   const formatCurrency = (amount) => `$${amount.toFixed(2)}`;
 
-  const containerStyle = {
-    marginTop: "20px",
-  };
-
+  const containerStyle = { marginTop: "20px" };
   const cardStyle = {
     backgroundColor: "white",
     padding: "25px",
@@ -87,284 +152,314 @@ function AccountTracker({ user, transactions }) {
     marginBottom: "20px",
   };
 
-  const balanceCardStyle = {
-    ...cardStyle,
-    background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
-    color: "white",
-    textAlign: "center",
-    padding: "40px",
-  };
-
-  const gridStyle = {
-    display: "grid",
-    gridTemplateColumns: "repeat(3, 1fr)",
-    gap: "20px",
-    marginBottom: "20px",
-  };
-
-  const metricCardStyle = {
-    backgroundColor: "white",
-    padding: "20px",
-    borderRadius: "10px",
-    boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
-    textAlign: "center",
-  };
-
-  const twoColumnGridStyle = {
-    display: "grid",
-    gridTemplateColumns: "1fr 1fr",
-    gap: "20px",
-  };
-
-  const transactionItemStyle = {
+  const inputRowStyle = {
     display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    padding: "12px",
-    backgroundColor: "#f9f9f9",
+    flexDirection: "column",
+    marginBottom: "15px",
+  };
+
+  const labelStyle = {
+    fontWeight: "bold",
+    marginBottom: "5px",
+    color: "#333",
+  };
+
+  const inputStyle = {
+    padding: "10px",
+    border: "1px solid #ddd",
     borderRadius: "5px",
-    marginBottom: "8px",
+    fontSize: "14px",
+  };
+
+  const buttonStyle = {
+    backgroundColor: loading ? "#ccc" : "#4CAF50",
+    color: "white",
+    border: "none",
+    padding: "12px",
+    borderRadius: "5px",
+    fontSize: "16px",
+    fontWeight: "bold",
+    cursor: loading ? "not-allowed" : "pointer",
+    marginTop: "10px",
   };
 
   return (
     <div style={containerStyle}>
-      <h2 style={{ color: "#1a1a2e", marginBottom: "20px" }}>Account Overview</h2>
+      <h2 style={{ color: "#1a1a2e", marginBottom: "10px" }}>Net Worth Tracker</h2>
 
-      {/* Balance Card */}
-      <div style={balanceCardStyle}>
+      {/* Net Worth Card */}
+      <div
+        style={{
+          ...cardStyle,
+          background: "linear-gradient(135deg, #11998e 0%, #38ef7d 100%)",
+          color: "white",
+          textAlign: "center",
+          padding: "40px",
+        }}
+      >
         <div style={{ fontSize: "16px", marginBottom: "10px", opacity: 0.9 }}>
-          Current Balance
+          Current Net Worth
         </div>
-        <div style={{ fontSize: "48px", fontWeight: "bold", marginBottom: "10px" }}>
-          {formatCurrency(accountMetrics.currentBalance)}
+        <div style={{ fontSize: "56px", fontWeight: "bold", marginBottom: "10px" }}>
+          {formatCurrency(netWorth)}
         </div>
         <div style={{ fontSize: "14px", opacity: 0.8 }}>
-          Total of {accountMetrics.transactionCount} transactions
+          {netWorthHistory.length > 1 && (
+            <>
+              {netWorthHistory[netWorthHistory.length - 1].netWorth >
+              netWorthHistory[netWorthHistory.length - 2].netWorth
+                ? "↑"
+                : "↓"}{" "}
+              {formatCurrency(
+                Math.abs(
+                  netWorthHistory[netWorthHistory.length - 1].netWorth -
+                    netWorthHistory[netWorthHistory.length - 2].netWorth
+                )
+              )}{" "}
+              from last update
+            </>
+          )}
         </div>
       </div>
 
-      {/* Key Metrics */}
-      <div style={gridStyle}>
-        <div style={metricCardStyle}>
-          <div style={{ fontSize: "14px", color: "#999", marginBottom: "10px" }}>
-            Total Income
-          </div>
-          <div style={{ fontSize: "32px", fontWeight: "bold", color: "#4CAF50" }}>
-            {formatCurrency(accountMetrics.totalIncome)}
-          </div>
-        </div>
-        <div style={metricCardStyle}>
-          <div style={{ fontSize: "14px", color: "#999", marginBottom: "10px" }}>
-            Total Expenses
-          </div>
-          <div style={{ fontSize: "32px", fontWeight: "bold", color: "#ff4444" }}>
-            {formatCurrency(accountMetrics.totalExpenses)}
-          </div>
-        </div>
-        <div style={metricCardStyle}>
-          <div style={{ fontSize: "14px", color: "#999", marginBottom: "10px" }}>
-            Savings Rate
-          </div>
-          <div style={{ fontSize: "32px", fontWeight: "bold", color: "#2196F3" }}>
-            {accountMetrics.totalIncome > 0
-              ? (
-                  ((accountMetrics.totalIncome - accountMetrics.totalExpenses) /
-                    accountMetrics.totalIncome) *
-                  100
-                ).toFixed(1)
-              : 0}
-            %
-          </div>
-        </div>
-      </div>
-
-      {/* This Month */}
-      <div style={cardStyle}>
-        <h3 style={{ marginTop: 0, color: "#333", marginBottom: "20px" }}>This Month</h3>
-        <div style={gridStyle}>
-          <div style={{ textAlign: "center" }}>
-            <div style={{ fontSize: "14px", color: "#999", marginBottom: "10px" }}>Income</div>
-            <div style={{ fontSize: "28px", fontWeight: "bold", color: "#4CAF50" }}>
-              {formatCurrency(accountMetrics.thisMonthIncome)}
-            </div>
-          </div>
-          <div style={{ textAlign: "center" }}>
-            <div style={{ fontSize: "14px", color: "#999", marginBottom: "10px" }}>Expenses</div>
-            <div style={{ fontSize: "28px", fontWeight: "bold", color: "#ff4444" }}>
-              {formatCurrency(accountMetrics.thisMonthExpenses)}
-            </div>
-            <div
-              style={{
-                fontSize: "12px",
-                color: accountMetrics.expenseChange > 0 ? "#ff4444" : "#4CAF50",
-                marginTop: "5px",
-              }}
-            >
-              {accountMetrics.expenseChange > 0 ? "↑" : "↓"}{" "}
-              {Math.abs(accountMetrics.expenseChange).toFixed(1)}% vs last month
-            </div>
-          </div>
-          <div style={{ textAlign: "center" }}>
-            <div style={{ fontSize: "14px", color: "#999", marginBottom: "10px" }}>Balance</div>
-            <div
-              style={{
-                fontSize: "28px",
-                fontWeight: "bold",
-                color: accountMetrics.thisMonthBalance >= 0 ? "#4CAF50" : "#ff4444",
-              }}
-            >
-              {formatCurrency(accountMetrics.thisMonthBalance)}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Two column layout */}
-      <div style={twoColumnGridStyle}>
-        {/* Recent Transactions */}
+      {/* Input Form + Summary */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px" }}>
+        {/* Input Form */}
         <div style={cardStyle}>
-          <h3 style={{ marginTop: 0, color: "#333", marginBottom: "15px" }}>
-            Recent Transactions
+          <h3 style={{ marginTop: 0, marginBottom: "20px", color: "#333" }}>
+            Record Account Balance
           </h3>
-          {recentTransactions.length === 0 ? (
-            <p style={{ color: "#999", textAlign: "center" }}>No transactions yet</p>
+          <div style={inputRowStyle}>
+            <label style={labelStyle}>Account Type *</label>
+            <select
+              value={accountType}
+              onChange={(e) => setAccountType(e.target.value)}
+              style={inputStyle}
+            >
+              <option value="liquid">Liquid Asset (Cash, Checking, Savings)</option>
+              <option value="investment">Investment (401k, Stocks, Real Estate)</option>
+              <option value="debt">Debt (Loans, Credit Cards)</option>
+            </select>
+          </div>
+          <div style={inputRowStyle}>
+            <label style={labelStyle}>Account Name *</label>
+            <input
+              type="text"
+              value={accountName}
+              onChange={(e) => setAccountName(e.target.value)}
+              style={inputStyle}
+              placeholder="e.g., Chase Checking, 401k, Car Loan"
+            />
+          </div>
+          <div style={inputRowStyle}>
+            <label style={labelStyle}>Current Balance *</label>
+            <input
+              type="number"
+              step="0.01"
+              value={balance}
+              onChange={(e) => setBalance(e.target.value)}
+              style={inputStyle}
+              placeholder="0.00"
+            />
+          </div>
+          <button onClick={addAccount} style={buttonStyle} disabled={loading}>
+            {loading ? "Recording..." : "Record Balance"}
+          </button>
+          <p style={{ fontSize: "12px", color: "#666", marginTop: "10px" }}>
+            Record your current balances regularly to track your net worth over time.
+          </p>
+        </div>
+
+        {/* Quick Summary */}
+        <div style={cardStyle}>
+          <h3 style={{ marginTop: 0, marginBottom: "20px", color: "#333" }}>Quick Summary</h3>
+          <div style={{ marginBottom: "20px" }}>
+            <div style={{ fontSize: "14px", color: "#999", marginBottom: "5px" }}>
+              Total Assets
+            </div>
+            <div style={{ fontSize: "32px", fontWeight: "bold", color: "#4CAF50" }}>
+              {formatCurrency(
+                accountsByType.liquid.reduce((sum, a) => sum + a.balance, 0) +
+                  accountsByType.investment.reduce((sum, a) => sum + a.balance, 0)
+              )}
+            </div>
+          </div>
+          <div style={{ marginBottom: "20px" }}>
+            <div style={{ fontSize: "14px", color: "#999", marginBottom: "5px" }}>
+              Total Debt
+            </div>
+            <div style={{ fontSize: "32px", fontWeight: "bold", color: "#ff4444" }}>
+              {formatCurrency(accountsByType.debt.reduce((sum, a) => sum + a.balance, 0))}
+            </div>
+          </div>
+          <div>
+            <div style={{ fontSize: "14px", color: "#999", marginBottom: "5px" }}>
+              Accounts Tracked
+            </div>
+            <div style={{ fontSize: "32px", fontWeight: "bold", color: "#2196F3" }}>
+              {latestAccounts.length}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Account Breakdown */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "20px" }}>
+        {/* Liquid Assets */}
+        <div style={cardStyle}>
+          <h3 style={{ marginTop: 0, color: "#4CAF50", marginBottom: "15px" }}>
+            💰 Liquid Assets
+          </h3>
+          {accountsByType.liquid.length === 0 ? (
+            <p style={{ color: "#999" }}>No liquid accounts tracked</p>
           ) : (
-            recentTransactions.map((t) => (
-              <div key={t.id} style={transactionItemStyle}>
-                <div>
-                  <div style={{ fontWeight: "bold", marginBottom: "3px" }}>
-                    {t.category}
-                    {t.store && <span style={{ color: "#999" }}> • {t.store}</span>}
-                  </div>
-                  <div style={{ fontSize: "12px", color: "#999" }}>
-                    {new Date(t.date).toLocaleDateString()}
-                  </div>
+            accountsByType.liquid.map((account) => (
+              <div
+                key={account.id}
+                style={{
+                  padding: "12px",
+                  backgroundColor: "#f9f9f9",
+                  borderRadius: "5px",
+                  marginBottom: "8px",
+                }}
+              >
+                <div style={{ fontWeight: "bold", marginBottom: "3px" }}>{account.name}</div>
+                <div style={{ fontSize: "18px", color: "#4CAF50", fontWeight: "bold" }}>
+                  {formatCurrency(account.balance)}
                 </div>
-                <div
-                  style={{
-                    fontWeight: "bold",
-                    fontSize: "18px",
-                    color: t.type === "income" ? "#4CAF50" : "#ff4444",
-                  }}
-                >
-                  {t.type === "income" ? "+" : "-"}
-                  {formatCurrency(t.amount)}
+                <div style={{ fontSize: "11px", color: "#999" }}>
+                  Updated: {new Date(account.date_recorded).toLocaleDateString()}
                 </div>
               </div>
             ))
           )}
         </div>
 
-        {/* Top Categories */}
+        {/* Investments */}
         <div style={cardStyle}>
-          <h3 style={{ marginTop: 0, color: "#333", marginBottom: "15px" }}>
-            Top Spending Categories
+          <h3 style={{ marginTop: 0, color: "#2196F3", marginBottom: "15px" }}>
+            📈 Investments
           </h3>
-          {categoryBreakdown.length === 0 ? (
-            <p style={{ color: "#999", textAlign: "center" }}>No expenses yet</p>
+          {accountsByType.investment.length === 0 ? (
+            <p style={{ color: "#999" }}>No investment accounts tracked</p>
           ) : (
-            categoryBreakdown.map(([category, amount], index) => {
-              const maxAmount = categoryBreakdown[0][1];
-              const percentage = (amount / maxAmount) * 100;
-              return (
-                <div key={category} style={{ marginBottom: "15px" }}>
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      marginBottom: "5px",
-                    }}
-                  >
-                    <span style={{ fontWeight: "bold" }}>
-                      {index + 1}. {category}
-                    </span>
-                    <span style={{ color: "#ff4444", fontWeight: "bold" }}>
-                      {formatCurrency(amount)}
-                    </span>
-                  </div>
-                  <div
-                    style={{
-                      height: "8px",
-                      backgroundColor: "#e0e0e0",
-                      borderRadius: "4px",
-                      overflow: "hidden",
-                    }}
-                  >
-                    <div
-                      style={{
-                        height: "100%",
-                        width: `${percentage}%`,
-                        backgroundColor: "#ff4444",
-                        transition: "width 0.3s",
-                      }}
-                    />
-                  </div>
+            accountsByType.investment.map((account) => (
+              <div
+                key={account.id}
+                style={{
+                  padding: "12px",
+                  backgroundColor: "#f9f9f9",
+                  borderRadius: "5px",
+                  marginBottom: "8px",
+                }}
+              >
+                <div style={{ fontWeight: "bold", marginBottom: "3px" }}>{account.name}</div>
+                <div style={{ fontSize: "18px", color: "#2196F3", fontWeight: "bold" }}>
+                  {formatCurrency(account.balance)}
                 </div>
-              );
-            })
+                <div style={{ fontSize: "11px", color: "#999" }}>
+                  Updated: {new Date(account.date_recorded).toLocaleDateString()}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+
+        {/* Debt */}
+        <div style={cardStyle}>
+          <h3 style={{ marginTop: 0, color: "#ff4444", marginBottom: "15px" }}>💳 Debt</h3>
+          {accountsByType.debt.length === 0 ? (
+            <p style={{ color: "#999" }}>No debt accounts tracked</p>
+          ) : (
+            accountsByType.debt.map((account) => (
+              <div
+                key={account.id}
+                style={{
+                  padding: "12px",
+                  backgroundColor: "#f9f9f9",
+                  borderRadius: "5px",
+                  marginBottom: "8px",
+                }}
+              >
+                <div style={{ fontWeight: "bold", marginBottom: "3px" }}>{account.name}</div>
+                <div style={{ fontSize: "18px", color: "#ff4444", fontWeight: "bold" }}>
+                  {formatCurrency(account.balance)}
+                </div>
+                <div style={{ fontSize: "11px", color: "#999" }}>
+                  Updated: {new Date(account.date_recorded).toLocaleDateString()}
+                </div>
+              </div>
+            ))
           )}
         </div>
       </div>
 
-      {/* Account Summary Stats */}
+      {/* Net Worth History */}
       <div style={cardStyle}>
-        <h3 style={{ marginTop: 0, color: "#333", marginBottom: "15px" }}>Quick Stats</h3>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(4, 1fr)",
-            gap: "15px",
-            textAlign: "center",
-          }}
-        >
-          <div>
-            <div style={{ fontSize: "12px", color: "#999", marginBottom: "5px" }}>
-              Avg Transaction
-            </div>
-            <div style={{ fontSize: "20px", fontWeight: "bold", color: "#333" }}>
-              {formatCurrency(
-                accountMetrics.transactionCount > 0
-                  ? (accountMetrics.totalIncome + accountMetrics.totalExpenses) /
-                      accountMetrics.transactionCount
-                  : 0
-              )}
-            </div>
+        <h3 style={{ marginTop: 0, color: "#333", marginBottom: "20px" }}>Net Worth History</h3>
+        {netWorthHistory.length === 0 ? (
+          <p style={{ color: "#999", textAlign: "center" }}>
+            No history yet. Start recording your account balances!
+          </p>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ borderBottom: "2px solid #e0e0e0" }}>
+                  <th style={{ padding: "12px", textAlign: "left" }}>Date</th>
+                  <th style={{ padding: "12px", textAlign: "right" }}>Assets</th>
+                  <th style={{ padding: "12px", textAlign: "right" }}>Debt</th>
+                  <th style={{ padding: "12px", textAlign: "right" }}>Net Worth</th>
+                  <th style={{ padding: "12px", textAlign: "right" }}>Change</th>
+                </tr>
+              </thead>
+              <tbody>
+                {netWorthHistory.map((entry, index) => {
+                  const prevEntry = index > 0 ? netWorthHistory[index - 1] : null;
+                  const change = prevEntry ? entry.netWorth - prevEntry.netWorth : 0;
+                  return (
+                    <tr key={entry.date} style={{ borderBottom: "1px solid #f0f0f0" }}>
+                      <td style={{ padding: "12px" }}>
+                        {new Date(entry.date).toLocaleDateString()}
+                      </td>
+                      <td style={{ padding: "12px", textAlign: "right", color: "#4CAF50" }}>
+                        {formatCurrency(entry.assets)}
+                      </td>
+                      <td style={{ padding: "12px", textAlign: "right", color: "#ff4444" }}>
+                        {formatCurrency(entry.debts)}
+                      </td>
+                      <td
+                        style={{
+                          padding: "12px",
+                          textAlign: "right",
+                          fontWeight: "bold",
+                          color: entry.netWorth >= 0 ? "#4CAF50" : "#ff4444",
+                        }}
+                      >
+                        {formatCurrency(entry.netWorth)}
+                      </td>
+                      <td
+                        style={{
+                          padding: "12px",
+                          textAlign: "right",
+                          color: change >= 0 ? "#4CAF50" : "#ff4444",
+                        }}
+                      >
+                        {prevEntry ? (
+                          <>
+                            {change >= 0 ? "↑" : "↓"} {formatCurrency(Math.abs(change))}
+                          </>
+                        ) : (
+                          "-"
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
-          <div>
-            <div style={{ fontSize: "12px", color: "#999", marginBottom: "5px" }}>
-              Largest Expense
-            </div>
-            <div style={{ fontSize: "20px", fontWeight: "bold", color: "#ff4444" }}>
-              {formatCurrency(
-                Math.max(
-                  ...transactions.filter((t) => t.type === "expense").map((t) => t.amount),
-                  0
-                )
-              )}
-            </div>
-          </div>
-          <div>
-            <div style={{ fontSize: "12px", color: "#999", marginBottom: "5px" }}>
-              Largest Income
-            </div>
-            <div style={{ fontSize: "20px", fontWeight: "bold", color: "#4CAF50" }}>
-              {formatCurrency(
-                Math.max(...transactions.filter((t) => t.type === "income").map((t) => t.amount), 0)
-              )}
-            </div>
-          </div>
-          <div>
-            <div style={{ fontSize: "12px", color: "#999", marginBottom: "5px" }}>
-              Expense Ratio
-            </div>
-            <div style={{ fontSize: "20px", fontWeight: "bold", color: "#2196F3" }}>
-              {accountMetrics.totalIncome > 0
-                ? ((accountMetrics.totalExpenses / accountMetrics.totalIncome) * 100).toFixed(1)
-                : 0}
-              %
-            </div>
-          </div>
-        </div>
+        )}
       </div>
     </div>
   );
