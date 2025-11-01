@@ -44,11 +44,11 @@ function App() {
     }
   };
 
-  // Add transaction
+  // Add transaction - FIXED: Added user_id to request body
   const addTransaction = async () => {
     if (!user) return alert("Please create a user first");
     try {
-      const res = await fetch(`/transactions/?user_id=${user.id}`, {
+      const res = await fetch("/transactions/", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -57,6 +57,7 @@ function App() {
           store,
           amount: parseFloat(amount),
           description,
+          user_id: user.id,  // FIX: Added user_id to the request body
         }),
       });
       if (!res.ok) throw new Error("Error adding transaction");
@@ -160,38 +161,30 @@ function App() {
 
           <h4 style={{ marginTop: "20px" }}>All Transactions</h4>
           {transactions.length === 0 ? (
-            <p>No transactions yet</p>
+            <p>No transactions yet.</p>
           ) : (
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
-              <thead>
-                <tr>
-                  <th style={{ textAlign: "left" }}>Date</th>
-                  <th style={{ textAlign: "left" }}>Category</th>
-                  <th style={{ textAlign: "left" }}>Store</th>
-                  <th style={{ textAlign: "right" }}>Amount</th>
-                  <th style={{ textAlign: "right" }}>Balance</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(() => {
-                  let runningBalance = 0;
-                  return transactions.map((t) => {
-                    runningBalance += t.type === "income" ? t.amount : -t.amount;
-                    return (
-                      <tr key={t.id} style={{ color: t.type === "income" ? "green" : "red" }}>
-                        <td>{t.date.split("T")[0]}</td>
-                        <td>{t.category}</td>
-                        <td>{t.store || "-"}</td>
-                        <td style={{ textAlign: "right" }}>
-                          {t.type === "income" ? `+ $${t.amount}` : `- $${t.amount}`}
-                        </td>
-                        <td style={{ textAlign: "right" }}>${runningBalance.toFixed(2)}</td>
-                      </tr>
-                    );
-                  });
-                })()}
-              </tbody>
-            </table>
+            <ul style={{ listStyle: "none", padding: 0 }}>
+              {transactions.map((t) => (
+                <li
+                  key={t.id}
+                  style={{
+                    border: "1px solid #ccc",
+                    borderRadius: "5px",
+                    padding: "10px",
+                    marginBottom: "10px",
+                  }}
+                >
+                  <strong>{t.type === "income" ? "➕" : "➖"} ${t.amount}</strong> - {t.category}
+                  {t.store && <> | {t.category}</>}
+                  {t.description && (
+                    <div style={{ fontSize: "0.9em", color: "#555" }}>{t.description}</div>
+                  )}
+                  <div style={{ fontSize: "0.8em", color: "#999" }}>
+                    {new Date(t.date).toLocaleDateString()}
+                  </div>
+                </li>
+              ))}
+            </ul>
           )}
         </>
       )}
