@@ -4,22 +4,28 @@ function Login({ setUser }) {
   const [isSignup, setIsSignup] = useState(true);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // Handle signup
+  // Handle signup (create new user)
   const handleSignup = async () => {
     setError("");
     
-    if (!email || !password || !firstName || !lastName) {
+    if (!email || !firstName || !lastName || !password) {
       setError("Please fill in all fields");
       return;
     }
 
     if (password.length < 6) {
       setError("Password must be at least 6 characters");
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      setError("Passwords do not match");
       return;
     }
 
@@ -37,18 +43,19 @@ function Login({ setUser }) {
         }),
       });
 
+      const data = await res.json().catch(() => null);
+
       if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data?.detail || `Server error: ${res.status}`);
+        const errorMessage = data?.detail || `Server error: ${res.status}`;
+        setError(errorMessage);
+        return;
       }
 
-      const data = await res.json();
       setUser(data);
       alert("Account created successfully!");
       
     } catch (err) {
-      console.error(err);
-      setError(err.message);
+      setError(`Network error: ${err.message}. Is the backend server running on port 8000?`);
     } finally {
       setLoading(false);
     }
@@ -59,10 +66,10 @@ function Login({ setUser }) {
     setError("");
     
     if (!email || !password) {
-      setError("Please enter email and password");
+      setError("Please enter your email and password");
       return;
     }
-    
+
     setLoading(true);
     
     try {
@@ -72,19 +79,31 @@ function Login({ setUser }) {
         body: JSON.stringify({ email, password }),
       });
 
+      const data = await res.json().catch(() => null);
+
       if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data?.detail || "Invalid email or password");
+        const errorMessage = data?.detail || `Server error: ${res.status}`;
+        setError(errorMessage);
+        return;
       }
 
-      const data = await res.json();
       setUser(data);
       
     } catch (err) {
-      console.error(err);
-      setError(err.message);
+      setError(`Network error: ${err.message}. Is the backend server running on port 8000?`);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Handle Enter key press
+  const handleKeyPress = (e) => {
+    if (e.key === "Enter") {
+      if (isSignup) {
+        handleSignup();
+      } else {
+        handleLogin();
+      }
     }
   };
 
@@ -166,6 +185,7 @@ function Login({ setUser }) {
               placeholder="First Name"
               value={firstName}
               onChange={(e) => setFirstName(e.target.value)}
+              onKeyPress={handleKeyPress}
               style={inputStyle}
               disabled={loading}
             />
@@ -174,6 +194,7 @@ function Login({ setUser }) {
               placeholder="Last Name"
               value={lastName}
               onChange={(e) => setLastName(e.target.value)}
+              onKeyPress={handleKeyPress}
               style={inputStyle}
               disabled={loading}
             />
@@ -182,6 +203,7 @@ function Login({ setUser }) {
               placeholder="Email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
+              onKeyPress={handleKeyPress}
               style={inputStyle}
               disabled={loading}
             />
@@ -190,6 +212,16 @@ function Login({ setUser }) {
               placeholder="Password (min 6 characters)"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
+              onKeyPress={handleKeyPress}
+              style={inputStyle}
+              disabled={loading}
+            />
+            <input
+              type="password"
+              placeholder="Confirm Password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              onKeyPress={handleKeyPress}
               style={inputStyle}
               disabled={loading}
             />
@@ -207,6 +239,8 @@ function Login({ setUser }) {
                 onClick={() => {
                   setIsSignup(false);
                   setError("");
+                  setPassword("");
+                  setConfirmPassword("");
                 }}
               >
                 Login
@@ -221,6 +255,7 @@ function Login({ setUser }) {
               placeholder="Email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
+              onKeyPress={handleKeyPress}
               style={inputStyle}
               disabled={loading}
             />
@@ -229,6 +264,7 @@ function Login({ setUser }) {
               placeholder="Password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
+              onKeyPress={handleKeyPress}
               style={inputStyle}
               disabled={loading}
             />
@@ -246,6 +282,7 @@ function Login({ setUser }) {
                 onClick={() => {
                   setIsSignup(true);
                   setError("");
+                  setPassword("");
                 }}
               >
                 Sign Up
