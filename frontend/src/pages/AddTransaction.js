@@ -175,7 +175,7 @@ function AddTransaction({ user, transactions, fetchTransactions }) {
             />
           </div>
           <div style={inputRowStyle}>
-            <label style={labelStyle}>Store / Source</label>
+            <label style={labelStyle}>Store</label>
             <input
               type="text"
               value={store}

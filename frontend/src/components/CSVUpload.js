@@ -6,9 +6,13 @@ function CSVUpload({ user, fetchTransactions, onClose }) {
   const [parsedTransactions, setParsedTransactions] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [step, setStep] = useState("upload"); // 'upload', 'review', 'complete'
+  const [step, setStep] = useState("upload"); // 'upload', 'review', 'one-by-one', 'complete'
   const [importStats, setImportStats] = useState(null);
   const fileInputRef = useRef(null);
+  
+  // One-by-one review state
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [reviewedCount, setReviewedCount] = useState(0);
 
   // Handle file selection
   const handleFileChange = (e) => {
@@ -25,11 +29,9 @@ function CSVUpload({ user, fetchTransactions, onClose }) {
   // Format date for display (YYYY-MM-DD)
   const formatDate = (dateStr) => {
     if (!dateStr) return "";
-    // If it's already a string in YYYY-MM-DD format, return as is
     if (typeof dateStr === "string" && dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
       return dateStr;
     }
-    // Otherwise try to parse and format
     const date = new Date(dateStr);
     return date.toISOString().split("T")[0];
   };
@@ -61,18 +63,17 @@ function CSVUpload({ user, fetchTransactions, onClose }) {
 
       const data = await res.json();
       
-      // Add editable fields to each transaction
-      // Backend now returns: date, store, description (null), original_type, amount, type, suggested_category
       const transactionsWithEdit = data.transactions.map((t, idx) => ({
         id: idx,
         date: formatDate(t.date),
         store: t.store || "",
-        description: t.description || "",  // Will be empty by default
+        description: t.description || "",
         amount: t.amount,
         type: t.type,
         category: t.suggested_category || "",
         original_type: t.original_type,
-        selected: true, // All selected by default
+        selected: true,
+        reviewed: false, // Track if reviewed in one-by-one mode
       }));
 
       setParsedTransactions(transactionsWithEdit);
@@ -104,6 +105,62 @@ function CSVUpload({ user, fetchTransactions, onClose }) {
     setParsedTransactions((prev) => prev.map((t) => ({ ...t, selected })));
   };
 
+  // Start one-by-one review mode
+  const startOneByOneReview = () => {
+    setCurrentIndex(0);
+    setReviewedCount(0);
+    setStep("one-by-one");
+  };
+
+  // Get current transaction for one-by-one review
+  const getCurrentTransaction = () => {
+    return parsedTransactions[currentIndex] || null;
+  };
+
+  // Save current transaction and move to next
+  const saveAndNext = () => {
+    setParsedTransactions((prev) =>
+      prev.map((t, idx) =>
+        idx === currentIndex ? { ...t, selected: true, reviewed: true } : t
+      )
+    );
+    setReviewedCount((prev) => prev + 1);
+    moveToNext();
+  };
+
+  // Skip current transaction (deselect it)
+  const skipTransaction = () => {
+    setParsedTransactions((prev) =>
+      prev.map((t, idx) =>
+        idx === currentIndex ? { ...t, selected: false, reviewed: true } : t
+      )
+    );
+    setReviewedCount((prev) => prev + 1);
+    moveToNext();
+  };
+
+  // Move to next transaction
+  const moveToNext = () => {
+    if (currentIndex < parsedTransactions.length - 1) {
+      setCurrentIndex((prev) => prev + 1);
+    } else {
+      // Finished reviewing all
+      setStep("review"); // Go back to table view to see final state
+    }
+  };
+
+  // Go back to table view from one-by-one
+  const backToTableView = () => {
+    setStep("review");
+  };
+
+  // Update current transaction field in one-by-one mode
+  const updateCurrentTransaction = (field, value) => {
+    setParsedTransactions((prev) =>
+      prev.map((t, idx) => (idx === currentIndex ? { ...t, [field]: value } : t))
+    );
+  };
+
   // Import selected transactions
   const handleImport = async () => {
     const selectedTransactions = parsedTransactions.filter((t) => t.selected);
@@ -113,7 +170,6 @@ function CSVUpload({ user, fetchTransactions, onClose }) {
       return;
     }
 
-    // Validate all selected transactions have categories
     const missingCategory = selectedTransactions.find((t) => !t.category);
     if (missingCategory) {
       setError("Please select a category for all transactions before importing");
@@ -124,15 +180,13 @@ function CSVUpload({ user, fetchTransactions, onClose }) {
     setError(null);
 
     try {
-      // Format transactions for the API
-      // Ensure date is in YYYY-MM-DD string format
       const transactionsToCreate = selectedTransactions.map((t) => ({
         type: t.type,
         category: t.category,
         store: t.store || null,
         amount: t.amount,
         description: t.description || null,
-        transaction_date: t.date,  // Already in YYYY-MM-DD format
+        transaction_date: t.date,
       }));
 
       const res = await fetch("/transactions/bulk-create", {
@@ -152,7 +206,7 @@ function CSVUpload({ user, fetchTransactions, onClose }) {
       const data = await res.json();
       setImportStats(data);
       setStep("complete");
-      fetchTransactions(); // Refresh the transaction list
+      fetchTransactions();
     } catch (err) {
       console.error(err);
       setError(err.message);
@@ -168,6 +222,8 @@ function CSVUpload({ user, fetchTransactions, onClose }) {
     setStep("upload");
     setError(null);
     setImportStats(null);
+    setCurrentIndex(0);
+    setReviewedCount(0);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
@@ -194,7 +250,7 @@ function CSVUpload({ user, fetchTransactions, onClose }) {
     maxWidth: "1000px",
     width: "95%",
     maxHeight: "85vh",
-    overflow: "hidden",
+    overflow: "auto",
     display: "flex",
     flexDirection: "column",
   };
@@ -241,6 +297,11 @@ function CSVUpload({ user, fetchTransactions, onClose }) {
   const secondaryButtonStyle = {
     ...buttonStyle,
     backgroundColor: "#666",
+  };
+
+  const reviewModeButtonStyle = {
+    ...buttonStyle,
+    backgroundColor: "#9c27b0",
   };
 
   const closeButtonStyle = {
@@ -348,15 +409,21 @@ function CSVUpload({ user, fetchTransactions, onClose }) {
     </>
   );
 
-  // Render review step
+  // Render review step (table view)
   const renderReviewStep = () => (
     <>
-      <div style={{ marginBottom: "15px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+      <div style={{ marginBottom: "15px", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px" }}>
         <div>
           <strong>{parsedTransactions.length}</strong> transactions found,{" "}
           <strong>{getSelectedCount()}</strong> selected for import
         </div>
-        <div style={{ display: "flex", gap: "10px" }}>
+        <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+          <button
+            onClick={startOneByOneReview}
+            style={{ ...reviewModeButtonStyle, padding: "8px 16px", fontSize: "12px" }}
+          >
+            🔍 Review One-by-One
+          </button>
           <button
             onClick={() => toggleAll(true)}
             style={{ ...secondaryButtonStyle, padding: "8px 16px", fontSize: "12px" }}
@@ -390,7 +457,7 @@ function CSVUpload({ user, fetchTransactions, onClose }) {
               <tr
                 key={t.id}
                 style={{
-                  backgroundColor: t.selected ? "white" : "#f9f9f9",
+                  backgroundColor: t.selected ? (t.reviewed ? "#e8f5e9" : "white") : "#f9f9f9",
                   opacity: t.selected ? 1 : 0.6,
                 }}
               >
@@ -481,6 +548,212 @@ function CSVUpload({ user, fetchTransactions, onClose }) {
     </>
   );
 
+  // Render one-by-one review step
+  const renderOneByOneStep = () => {
+    const current = getCurrentTransaction();
+    const progress = ((currentIndex) / parsedTransactions.length) * 100;
+    const isLastTransaction = currentIndex === parsedTransactions.length - 1;
+    const isFinished = currentIndex >= parsedTransactions.length;
+
+    // Show completion message when done
+    if (isFinished) {
+      const selectedAfterReview = parsedTransactions.filter((t) => t.selected).length;
+      return (
+        <div style={{ textAlign: "center", padding: "30px 20px" }}>
+          <div style={{ fontSize: "40px", marginBottom: "15px" }}>🎉</div>
+          <h3 style={{ color: "#2e7d32", marginBottom: "8px" }}>Review Complete!</h3>
+          <p style={{ color: "#666", marginBottom: "8px", fontSize: "14px" }}>
+            You've reviewed all <strong>{parsedTransactions.length}</strong> transactions.
+          </p>
+          <p style={{ color: "#666", marginBottom: "20px", fontSize: "14px" }}>
+            <strong>{selectedAfterReview}</strong> transactions are selected for import.
+          </p>
+          <div style={{ display: "flex", gap: "10px", justifyContent: "center" }}>
+            <button onClick={backToTableView} style={buttonStyle}>
+              View Summary & Import
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <>
+        {/* Progress Bar */}
+        <div style={{ marginBottom: "12px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "5px" }}>
+            <span style={{ fontSize: "13px", color: "#666" }}>
+              Transaction {currentIndex + 1} of {parsedTransactions.length}
+            </span>
+            <span style={{ fontSize: "13px", color: "#666" }}>
+              {Math.round(progress)}% complete
+            </span>
+          </div>
+          <div style={{ 
+            width: "100%", 
+            height: "6px", 
+            backgroundColor: "#e0e0e0", 
+            borderRadius: "3px",
+            overflow: "hidden"
+          }}>
+            <div style={{ 
+              width: `${progress}%`, 
+              height: "100%", 
+              backgroundColor: "#4CAF50",
+              borderRadius: "3px",
+              transition: "width 0.3s ease"
+            }} />
+          </div>
+        </div>
+
+        {/* Compact Transaction Card */}
+        {current && (
+          <div style={{ 
+            backgroundColor: "#f9f9f9", 
+            borderRadius: "8px", 
+            padding: "15px",
+            border: "1px solid #e0e0e0",
+          }}>
+            {/* Header row with date, type, and amount */}
+            <div style={{ 
+              display: "flex", 
+              justifyContent: "space-between", 
+              alignItems: "center",
+              marginBottom: "12px",
+              paddingBottom: "10px",
+              borderBottom: "1px solid #e0e0e0"
+            }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                <span style={{ fontSize: "14px", color: "#666" }}>
+                  {current.date}
+                </span>
+                <span
+                  style={{
+                    padding: "3px 10px",
+                    borderRadius: "12px",
+                    fontSize: "11px",
+                    fontWeight: "bold",
+                    backgroundColor: current.type === "income" ? "#e8f5e9" : "#ffebee",
+                    color: current.type === "income" ? "#2e7d32" : "#c62828",
+                  }}
+                >
+                  {current.type.toUpperCase()}
+                </span>
+              </div>
+              <div style={{ 
+                fontSize: "22px", 
+                fontWeight: "bold",
+                color: current.type === "income" ? "#2e7d32" : "#c62828"
+              }}>
+                ${current.amount.toFixed(2)}
+              </div>
+            </div>
+
+            {/* Form fields in a more compact layout */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+              <div>
+                <label style={{ fontSize: "12px", fontWeight: "bold", color: "#333", display: "block", marginBottom: "3px" }}>
+                  Store
+                </label>
+                <input
+                  type="text"
+                  value={current.store}
+                  onChange={(e) => updateCurrentTransaction("store", e.target.value)}
+                  style={{ ...inputStyle, fontSize: "13px", padding: "8px", width: "100%", boxSizing: "border-box" }}
+                  placeholder="Store name"
+                />
+              </div>
+
+              <div>
+                <label style={{ fontSize: "12px", fontWeight: "bold", color: "#333", display: "block", marginBottom: "3px" }}>
+                  Category *
+                </label>
+                <select
+                  value={current.category}
+                  onChange={(e) => updateCurrentTransaction("category", e.target.value)}
+                  style={{ 
+                    ...inputStyle, 
+                    fontSize: "13px", 
+                    padding: "8px",
+                    width: "100%",
+                    boxSizing: "border-box",
+                    backgroundColor: !current.category ? "#fff3e0" : "white"
+                  }}
+                >
+                  <option value="">-- Select --</option>
+                  {categoryOptions.map((cat) => (
+                    <option key={cat} value={cat}>
+                      {cat}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div style={{ gridColumn: "1 / -1" }}>
+                <label style={{ fontSize: "12px", fontWeight: "bold", color: "#333", display: "block", marginBottom: "3px" }}>
+                  Description / Notes
+                </label>
+                <input
+                  type="text"
+                  value={current.description}
+                  onChange={(e) => updateCurrentTransaction("description", e.target.value)}
+                  style={{ ...inputStyle, fontSize: "13px", padding: "8px", width: "100%", boxSizing: "border-box" }}
+                  placeholder="Add optional notes..."
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Action Buttons */}
+        <div style={{ 
+          display: "flex", 
+          gap: "12px", 
+          marginTop: "15px", 
+          justifyContent: "center",
+          alignItems: "center"
+        }}>
+          <button 
+            onClick={skipTransaction} 
+            style={{ 
+              ...secondaryButtonStyle, 
+              padding: "10px 24px",
+              fontSize: "14px",
+              backgroundColor: "#f44336"
+            }}
+          >
+            ❌ Skip
+          </button>
+          <button 
+            onClick={saveAndNext} 
+            style={{ 
+              ...buttonStyle, 
+              padding: "10px 24px",
+              fontSize: "14px"
+            }}
+            disabled={!current?.category}
+          >
+            ✓ {isLastTransaction ? "Save & Finish" : "Save & Next"}
+          </button>
+          <span style={{ color: "#ccc", margin: "0 5px" }}>|</span>
+          <button 
+            onClick={backToTableView}
+            style={{ 
+              background: "none", 
+              border: "none", 
+              color: "#666", 
+              cursor: "pointer",
+              textDecoration: "underline",
+              fontSize: "13px"
+            }}
+          >
+            ← Back to table
+          </button>
+        </div>
+      </>
+    );
+  };
+
   // Render complete step
   const renderCompleteStep = () => (
     <div style={{ textAlign: "center", padding: "40px 20px" }}>
@@ -510,13 +783,27 @@ function CSVUpload({ user, fetchTransactions, onClose }) {
     </div>
   );
 
+  // Get header title based on step
+  const getHeaderTitle = () => {
+    switch (step) {
+      case "upload":
+        return "📤 Upload CSV";
+      case "review":
+        return "📋 Review Transactions";
+      case "one-by-one":
+        return "🔍 Review One-by-One";
+      case "complete":
+        return "✅ Import Complete";
+      default:
+        return "CSV Upload";
+    }
+  };
+
   return (
     <div style={modalOverlayStyle} onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div style={modalStyle}>
         <div style={headerStyle}>
-          <h2 style={{ margin: 0, color: "#1a1a2e" }}>
-            📤 {step === "upload" ? "Upload CSV" : step === "review" ? "Review Transactions" : "Import Complete"}
-          </h2>
+          <h2 style={{ margin: 0, color: "#1a1a2e" }}>{getHeaderTitle()}</h2>
           <button onClick={onClose} style={closeButtonStyle}>
             ×
           </button>
@@ -538,6 +825,7 @@ function CSVUpload({ user, fetchTransactions, onClose }) {
 
         {step === "upload" && renderUploadStep()}
         {step === "review" && renderReviewStep()}
+        {step === "one-by-one" && renderOneByOneStep()}
         {step === "complete" && renderCompleteStep()}
       </div>
     </div>
