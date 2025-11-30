@@ -1,9 +1,12 @@
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
+from typing import Optional
 from . import models, schemas
 from .database import Base, engine, get_db
 from .auth import hash_password, verify_password
+from .csv_parser import parse_csv
+from .schemas_csv import ParsedTransaction, CSVUploadResponse, BulkTransactionCreate
 
 # Create tables if not exist
 Base.metadata.create_all(bind=engine)
@@ -142,6 +145,114 @@ def get_transaction_summary(user_id: int, db: Session = Depends(get_db)):
         print(f"❌ Error fetching summary: {e}")
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
+# ------------------- CSV Upload -------------------
+@app.post("/transactions/parse-csv", response_model=CSVUploadResponse)
+async def parse_csv_file(
+    file: UploadFile = File(...),
+    bank_type: Optional[str] = Form(default="auto")
+):
+    """
+    Parse a CSV file and return transactions for review.
+    
+    bank_type options: 'auto', 'sofi_savings', 'sofi_checking', 'capital_one'
+    """
+    try:
+        # Read file content
+        content = await file.read()
+        content_str = content.decode("utf-8")
+        
+        # Parse CSV
+        detected_type, transactions = parse_csv(content_str, bank_type)
+        
+        # Convert to response format
+        parsed_transactions = [
+            ParsedTransaction(
+                date=t["date"],
+                description=t["description"],
+                original_type=t["original_type"],
+                amount=t["amount"],
+                type=t["type"],
+                suggested_category=t.get("suggested_category"),
+                store=t.get("store")
+            )
+            for t in transactions
+        ]
+        
+        return CSVUploadResponse(
+            success=True,
+            message=f"Successfully parsed {len(transactions)} transactions",
+            bank_type=detected_type,
+            transaction_count=len(transactions),
+            transactions=parsed_transactions
+        )
+        
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        print(f"❌ Error parsing CSV: {e}")
+        raise HTTPException(status_code=500, detail=f"Error parsing CSV: {str(e)}")
+
+
+@app.post("/transactions/bulk-create")
+async def bulk_create_transactions(
+    data: BulkTransactionCreate,
+    db: Session = Depends(get_db)
+):
+    """
+    Create multiple transactions at once.
+    Used after reviewing parsed CSV transactions.
+    """
+    from datetime import datetime, date
+    
+    try:
+        # Verify user exists
+        user = db.query(models.User).filter(models.User.id == data.user_id).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        created_count = 0
+        errors = []
+        
+        for idx, t in enumerate(data.transactions):
+            try:
+                # Convert date string to date object if needed
+                trans_date = t["transaction_date"]
+                if isinstance(trans_date, str):
+                    trans_date = datetime.strptime(trans_date, "%Y-%m-%d").date()
+                elif isinstance(trans_date, datetime):
+                    trans_date = trans_date.date()
+                
+                # Create transaction
+                db_transaction = models.Transaction(
+                    type=t["type"],
+                    category=t["category"],
+                    store=t.get("store") or None,
+                    amount=float(t["amount"]),
+                    description=t.get("description") or None,
+                    transaction_date=trans_date,
+                    user_id=data.user_id
+                )
+                db.add(db_transaction)
+                created_count += 1
+            except Exception as e:
+                errors.append(f"Transaction {idx + 1}: {str(e)}")
+        
+        db.commit()
+        
+        return {
+            "success": True,
+            "created_count": created_count,
+            "errors": errors if errors else None,
+            "message": f"Successfully created {created_count} transactions"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        print(f"❌ Error creating bulk transactions: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
 # ------------------- Accounts -------------------
 @app.post("/accounts/", response_model=schemas.AccountOut)
 def create_account(account: schemas.AccountCreate, db: Session = Depends(get_db)):
@@ -207,5 +318,5 @@ def read_root():
     return {
         "status": "ok",
         "message": "Personal Finance API is running",
-        "version": "2.1"
+        "version": "2.2"  # Updated version for CSV upload feature
     }

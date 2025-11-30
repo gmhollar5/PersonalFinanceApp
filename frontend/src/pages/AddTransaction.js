@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import CSVUpload from "../components/CSVUpload";
 
 function AddTransaction({ user, transactions, fetchTransactions }) {
   const [type, setType] = useState("expense");
@@ -9,6 +10,7 @@ function AddTransaction({ user, transactions, fetchTransactions }) {
   const [transactionDate, setTransactionDate] = useState(
     new Date().toISOString().split("T")[0]
   ); // Default to today
+  const [showCSVUpload, setShowCSVUpload] = useState(false);
 
   // Add transaction
   const addTransaction = async () => {
@@ -107,6 +109,15 @@ function AddTransaction({ user, transactions, fetchTransactions }) {
     marginTop: "10px",
   };
 
+  const csvButtonStyle = {
+    ...buttonStyle,
+    backgroundColor: "#2196F3",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: "8px",
+  };
+
   const transactionItemStyle = {
     border: "1px solid #e0e0e0",
     borderRadius: "5px",
@@ -115,9 +126,22 @@ function AddTransaction({ user, transactions, fetchTransactions }) {
     backgroundColor: "#fafafa",
   };
 
+  const headerWithButtonStyle = {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: "10px",
+  };
+
   return (
     <div>
-      <h2 style={{ color: "#1a1a2e", marginBottom: "10px" }}>Add Transaction</h2>
+      <div style={headerWithButtonStyle}>
+        <h2 style={{ color: "#1a1a2e", margin: 0 }}>Add Transaction</h2>
+        <button onClick={() => setShowCSVUpload(true)} style={csvButtonStyle}>
+          📤 Import CSV
+        </button>
+      </div>
+
       <div style={containerStyle}>
         {/* Left side - Form */}
         <div style={cardStyle}>
@@ -229,6 +253,15 @@ function AddTransaction({ user, transactions, fetchTransactions }) {
           </div>
         </div>
       </div>
+
+      {/* CSV Upload Modal */}
+      {showCSVUpload && (
+        <CSVUpload
+          user={user}
+          fetchTransactions={fetchTransactions}
+          onClose={() => setShowCSVUpload(false)}
+        />
+      )}
     </div>
   );
 }
