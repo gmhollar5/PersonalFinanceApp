@@ -3,75 +3,89 @@ import React, { useState } from "react";
 function Login({ setUser }) {
   const [isSignup, setIsSignup] = useState(true);
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // Handle signup (create new user)
+  // Handle signup
   const handleSignup = async () => {
-    // Clear previous errors
     setError("");
     
-    // Validation
-    if (!email || !firstName || !lastName) {
+    if (!email || !password || !firstName || !lastName) {
       setError("Please fill in all fields");
+      return;
+    }
+
+    if (password.length < 6) {
+      setError("Password must be at least 6 characters");
       return;
     }
 
     setLoading(true);
     
     try {
-      console.log("Attempting to create user with:", { first_name: firstName, last_name: lastName, email });
-      
-      const res = await fetch("/users/", {
+      const res = await fetch("/signup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
           first_name: firstName, 
           last_name: lastName, 
-          email 
+          email,
+          password
         }),
       });
 
-      console.log("Response status:", res.status);
-      
-      // Try to get the response body regardless of status
-      const data = await res.json().catch(() => null);
-      console.log("Response data:", data);
-
       if (!res.ok) {
-        // Show the actual error message from the backend
-        const errorMessage = data?.detail || `Server error: ${res.status}`;
-        setError(errorMessage);
-        console.error("Signup failed:", errorMessage);
-        return;
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data?.detail || `Server error: ${res.status}`);
       }
 
-      // Success!
-      console.log("User created successfully:", data);
+      const data = await res.json();
       setUser(data);
       alert("Account created successfully!");
       
     } catch (err) {
-      console.error("Network or parsing error:", err);
-      setError(`Network error: ${err.message}. Is the backend server running on port 8000?`);
+      console.error(err);
+      setError(err.message);
     } finally {
       setLoading(false);
     }
   };
 
-  // Handle login (mock - in production you'd authenticate)
+  // Handle login
   const handleLogin = async () => {
     setError("");
     
-    if (!email) {
-      setError("Please enter your email");
+    if (!email || !password) {
+      setError("Please enter email and password");
       return;
     }
     
-    // For now, we'll just fetch the user by email (not secure, but works for MVP)
-    alert("Login functionality coming soon! For now, please use signup.");
+    setLoading(true);
+    
+    try {
+      const res = await fetch("/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data?.detail || "Invalid email or password");
+      }
+
+      const data = await res.json();
+      setUser(data);
+      
+    } catch (err) {
+      console.error(err);
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const containerStyle = {
@@ -171,6 +185,14 @@ function Login({ setUser }) {
               style={inputStyle}
               disabled={loading}
             />
+            <input
+              type="password"
+              placeholder="Password (min 6 characters)"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              style={inputStyle}
+              disabled={loading}
+            />
             <button 
               onClick={handleSignup} 
               style={buttonStyle}
@@ -200,14 +222,22 @@ function Login({ setUser }) {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               style={inputStyle}
+              disabled={loading}
             />
             <input
               type="password"
               placeholder="Password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
               style={inputStyle}
+              disabled={loading}
             />
-            <button onClick={handleLogin} style={buttonStyle}>
-              Login
+            <button 
+              onClick={handleLogin} 
+              style={buttonStyle}
+              disabled={loading}
+            >
+              {loading ? "Logging in..." : "Login"}
             </button>
             <div style={linkStyle}>
               Don't have an account?{" "}
@@ -223,12 +253,6 @@ function Login({ setUser }) {
             </div>
           </>
         )}
-        
-        <div style={{ marginTop: "20px", padding: "10px", backgroundColor: "#f5f5f5", borderRadius: "5px", fontSize: "12px", color: "#666" }}>
-          <strong>Debug Info:</strong>
-          <br />Backend should be running at: http://localhost:8000
-          <br />Check browser console (F12) for detailed error logs
-        </div>
       </div>
     </div>
   );
