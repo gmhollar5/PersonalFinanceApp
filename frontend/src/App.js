@@ -59,7 +59,12 @@ function App() {
                 />
                 <Route
                   path="/view-transactions"
-                  element={<ViewTransactions transactions={transactions} />}
+                  element={
+                    <ViewTransactions
+                      transactions={transactions}
+                      fetchTransactions={fetchTransactions}
+                    />
+                  }
                 />
                 <Route
                   path="/analytics"

@@ -1,5 +1,4 @@
-import React, { useState } from "react";
-import CSVUpload from "../components/CSVUpload";
+import React, { useState, useEffect } from "react";
 
 function AddTransaction({ user, transactions, fetchTransactions }) {
   const [type, setType] = useState("expense");
@@ -7,15 +6,97 @@ function AddTransaction({ user, transactions, fetchTransactions }) {
   const [store, setStore] = useState("");
   const [amount, setAmount] = useState("");
   const [description, setDescription] = useState("");
+  const [tag, setTag] = useState("");
   const [transactionDate, setTransactionDate] = useState(
     new Date().toISOString().split("T")[0]
-  ); // Default to today
-  const [showCSVUpload, setShowCSVUpload] = useState(false);
+  );
+  
+  // Upload history state
+  const [uploadHistory, setUploadHistory] = useState([]);
+  const [currentSessionId, setCurrentSessionId] = useState(null);
+  const [sessionTransactionCount, setSessionTransactionCount] = useState(0);
+
+  // Fetch upload history
+  const fetchUploadHistory = async () => {
+    try {
+      const res = await fetch(`/upload-sessions/user/${user.id}`);
+      if (!res.ok) throw new Error("Failed to fetch upload history");
+      const data = await res.json();
+      setUploadHistory(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error(err);
+      setUploadHistory([]);
+    }
+  };
+
+  // Create a new manual upload session when component mounts
+  useEffect(() => {
+    fetchUploadHistory();
+  }, [user.id]);
+
+  // Create manual session when user starts adding transactions
+  const ensureManualSession = async () => {
+    if (!currentSessionId) {
+      try {
+        const res = await fetch("/upload-sessions/", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            user_id: user.id,
+            upload_type: "manual",
+            transaction_count: 0,
+          }),
+        });
+        if (!res.ok) throw new Error("Failed to create session");
+        const session = await res.json();
+        setCurrentSessionId(session.id);
+        return session.id;
+      } catch (err) {
+        console.error("Error creating manual session:", err);
+        return null;
+      }
+    }
+    return currentSessionId;
+  };
+
+  // Update session when transaction is added
+  const updateSession = async (sessionId, transactionDate) => {
+    try {
+      const newCount = sessionTransactionCount + 1;
+      
+      // Get the most recent transaction date
+      const currentMostRecent = uploadHistory.find(s => s.id === sessionId)?.most_recent_transaction_date;
+      const mostRecentDate = !currentMostRecent || new Date(transactionDate) > new Date(currentMostRecent)
+        ? transactionDate
+        : currentMostRecent;
+
+      await fetch(`/upload-sessions/${sessionId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          transaction_count: newCount,
+          most_recent_transaction_date: mostRecentDate,
+        }),
+      });
+      
+      setSessionTransactionCount(newCount);
+      fetchUploadHistory();
+    } catch (err) {
+      console.error("Error updating session:", err);
+    }
+  };
 
   // Add transaction
   const addTransaction = async () => {
-    if (!category || !amount || !transactionDate) {
-      alert("Please fill in category, amount, and date");
+    if (!category || !store || !amount || !transactionDate) {
+      alert("Please fill in category, store, amount, and date");
+      return;
+    }
+
+    // Ensure we have a manual session
+    const sessionId = await ensureManualSession();
+    if (!sessionId) {
+      alert("Error creating upload session");
       return;
     }
 
@@ -29,7 +110,10 @@ function AddTransaction({ user, transactions, fetchTransactions }) {
           store,
           amount: parseFloat(amount),
           description,
+          tag: tag || null,
           transaction_date: transactionDate,
+          is_bulk_upload: false,
+          upload_session_id: sessionId,
           user_id: user.id,
         }),
       });
@@ -39,30 +123,69 @@ function AddTransaction({ user, transactions, fetchTransactions }) {
       }
       await res.json();
       alert("Transaction added!");
+      
+      // Update the session
+      await updateSession(sessionId, transactionDate);
+      
       fetchTransactions();
+      
       // Clear form except date
       setCategory("");
       setAmount("");
       setDescription("");
       setStore("");
-      // Keep the date for convenience
+      setTag("");
     } catch (err) {
       console.error(err);
       alert(`Error adding transaction: ${err.message}`);
     }
   };
 
-  // Get transactions from the last week
-  const getLastWeekTransactions = () => {
-    const oneWeekAgo = new Date();
-    oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+  // Delete upload session
+  const deleteUploadSession = async (sessionId) => {
+    if (!window.confirm("Are you sure? This will delete all transactions in this upload session.")) {
+      return;
+    }
 
-    return transactions
-      .filter((t) => new Date(t.transaction_date) >= oneWeekAgo)
-      .sort((a, b) => new Date(b.transaction_date) - new Date(a.transaction_date));
+    try {
+      const res = await fetch(`/upload-sessions/${sessionId}`, {
+        method: "DELETE",
+      });
+      
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.detail || "Error deleting upload session");
+      }
+      
+      alert("Upload session deleted successfully!");
+      fetchUploadHistory();
+      fetchTransactions();
+      
+      // Reset current session if it was deleted
+      if (sessionId === currentSessionId) {
+        setCurrentSessionId(null);
+        setSessionTransactionCount(0);
+      }
+    } catch (err) {
+      console.error(err);
+      alert(`Error deleting upload session: ${err.message}`);
+    }
   };
 
-  const lastWeekTransactions = getLastWeekTransactions();
+  // When component unmounts or user navigates away, finalize the session
+  useEffect(() => {
+    return () => {
+      // This runs on cleanup
+      if (currentSessionId && sessionTransactionCount > 0) {
+        // Session will remain in database for history
+      } else if (currentSessionId && sessionTransactionCount === 0) {
+        // Optionally delete empty sessions
+        fetch(`/upload-sessions/${currentSessionId}`, {
+          method: "DELETE",
+        }).catch(err => console.error("Error cleaning up empty session:", err));
+      }
+    };
+  }, [currentSessionId, sessionTransactionCount]);
 
   const containerStyle = {
     display: "grid",
@@ -109,159 +232,193 @@ function AddTransaction({ user, transactions, fetchTransactions }) {
     marginTop: "10px",
   };
 
-  const csvButtonStyle = {
-    ...buttonStyle,
-    backgroundColor: "#2196F3",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: "8px",
+  const historyTableStyle = {
+    width: "100%",
+    borderCollapse: "collapse",
+    marginTop: "15px",
   };
 
-  const transactionItemStyle = {
-    border: "1px solid #e0e0e0",
-    borderRadius: "5px",
-    padding: "15px",
-    marginBottom: "10px",
-    backgroundColor: "#fafafa",
+  const thStyle = {
+    backgroundColor: "#1a1a2e",
+    color: "white",
+    padding: "10px",
+    textAlign: "left",
+    fontSize: "13px",
   };
 
-  const headerWithButtonStyle = {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: "10px",
+  const tdStyle = {
+    padding: "10px",
+    borderBottom: "1px solid #eee",
+    fontSize: "13px",
+  };
+
+  const badgeStyle = (type) => ({
+    display: "inline-block",
+    padding: "4px 10px",
+    borderRadius: "12px",
+    fontSize: "11px",
+    fontWeight: "bold",
+    backgroundColor: type === "bulk" ? "#2196F3" : "#9E9E9E",
+    color: "white",
+  });
+
+  const deleteButtonStyle = {
+    backgroundColor: "#f44336",
+    color: "white",
+    border: "none",
+    padding: "5px 10px",
+    borderRadius: "4px",
+    cursor: "pointer",
+    fontSize: "12px",
+    fontWeight: "bold",
   };
 
   return (
-    <div>
-      <div style={headerWithButtonStyle}>
-        <h2 style={{ color: "#1a1a2e", margin: 0 }}>Add Transaction</h2>
-        <button onClick={() => setShowCSVUpload(true)} style={csvButtonStyle}>
-          📤 Import CSV
+    <div style={containerStyle}>
+      {/* Left Column - Add Transaction Form */}
+      <div style={cardStyle}>
+        <h2 style={{ marginTop: 0 }}>Add Transaction</h2>
+
+        {/* Type */}
+        <div style={inputRowStyle}>
+          <label style={labelStyle}>Type</label>
+          <select style={inputStyle} value={type} onChange={(e) => setType(e.target.value)}>
+            <option value="expense">Expense</option>
+            <option value="income">Income</option>
+          </select>
+        </div>
+
+        {/* Category */}
+        <div style={inputRowStyle}>
+          <label style={labelStyle}>Category *</label>
+          <input
+            type="text"
+            style={inputStyle}
+            placeholder="e.g., Groceries, Salary"
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+          />
+        </div>
+
+        {/* Store */}
+        <div style={inputRowStyle}>
+          <label style={labelStyle}>Store *</label>
+          <input
+            type="text"
+            style={inputStyle}
+            placeholder="e.g., Target, ABC Company"
+            value={store}
+            onChange={(e) => setStore(e.target.value)}
+          />
+        </div>
+
+        {/* Amount */}
+        <div style={inputRowStyle}>
+          <label style={labelStyle}>Amount *</label>
+          <input
+            type="number"
+            style={inputStyle}
+            placeholder="0.00"
+            step="0.01"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+          />
+        </div>
+
+        {/* Tag */}
+        <div style={inputRowStyle}>
+          <label style={labelStyle}>Tag (Optional)</label>
+          <input
+            type="text"
+            style={inputStyle}
+            placeholder="e.g., vacation, holiday-gifts"
+            value={tag}
+            onChange={(e) => setTag(e.target.value)}
+          />
+        </div>
+
+        {/* Description */}
+        <div style={inputRowStyle}>
+          <label style={labelStyle}>Description (Optional)</label>
+          <textarea
+            style={{ ...inputStyle, minHeight: "60px", resize: "vertical" }}
+            placeholder="Additional details..."
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+          />
+        </div>
+
+        {/* Transaction Date */}
+        <div style={inputRowStyle}>
+          <label style={labelStyle}>Transaction Date *</label>
+          <input
+            type="date"
+            style={inputStyle}
+            value={transactionDate}
+            onChange={(e) => setTransactionDate(e.target.value)}
+          />
+        </div>
+
+        <button onClick={addTransaction} style={buttonStyle}>
+          Add Transaction
         </button>
       </div>
 
-      <div style={containerStyle}>
-        {/* Left side - Form */}
-        <div style={cardStyle}>
-          <h3 style={{ marginTop: 0, marginBottom: "20px", color: "#333" }}>
-            New Transaction
-          </h3>
-          <div style={inputRowStyle}>
-            <label style={labelStyle}>Type</label>
-            <select value={type} onChange={(e) => setType(e.target.value)} style={inputStyle}>
-              <option value="expense">Expense</option>
-              <option value="income">Income</option>
-            </select>
-          </div>
-          <div style={inputRowStyle}>
-            <label style={labelStyle}>Transaction Date *</label>
-            <input
-              type="date"
-              value={transactionDate}
-              onChange={(e) => setTransactionDate(e.target.value)}
-              style={inputStyle}
-            />
-          </div>
-          <div style={inputRowStyle}>
-            <label style={labelStyle}>Category *</label>
-            <input
-              type="text"
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-              style={inputStyle}
-              placeholder="e.g., Groceries, Salary"
-            />
-          </div>
-          <div style={inputRowStyle}>
-            <label style={labelStyle}>Store</label>
-            <input
-              type="text"
-              value={store}
-              onChange={(e) => setStore(e.target.value)}
-              style={inputStyle}
-              placeholder="e.g., Walmart, Company Name"
-            />
-          </div>
-          <div style={inputRowStyle}>
-            <label style={labelStyle}>Amount *</label>
-            <input
-              type="number"
-              step="0.01"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              style={inputStyle}
-              placeholder="0.00"
-            />
-          </div>
-          <div style={inputRowStyle}>
-            <label style={labelStyle}>Description</label>
-            <input
-              type="text"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              style={inputStyle}
-              placeholder="Optional notes"
-            />
-          </div>
-          <button onClick={addTransaction} style={buttonStyle}>
-            Add Transaction
-          </button>
-        </div>
+      {/* Right Column - Upload History */}
+      <div style={cardStyle}>
+        <h2 style={{ marginTop: 0 }}>Upload History</h2>
+        <p style={{ color: "#666", fontSize: "14px" }}>
+          Track your transaction uploads - both bulk CSV imports and manual entries.
+        </p>
 
-        {/* Right side - Last week's transactions */}
-        <div style={cardStyle}>
-          <h3 style={{ marginTop: 0, marginBottom: "20px", color: "#333" }}>
-            Last Week's Transactions ({lastWeekTransactions.length})
-          </h3>
-          <div style={{ maxHeight: "500px", overflowY: "auto" }}>
-            {lastWeekTransactions.length === 0 ? (
-              <p style={{ color: "#999", textAlign: "center" }}>
-                No transactions in the last 7 days
-              </p>
-            ) : (
-              lastWeekTransactions.map((t) => (
-                <div key={t.id} style={transactionItemStyle}>
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      marginBottom: "5px",
-                    }}
-                  >
-                    <strong style={{ fontSize: "16px" }}>
-                      {t.type === "income" ? "➕" : "➖"} ${t.amount.toFixed(2)}
-                    </strong>
-                    <span style={{ fontSize: "12px", color: "#999" }}>
-                      {new Date(t.transaction_date).toLocaleDateString()}
-                    </span>
-                  </div>
-                  <div style={{ color: "#555" }}>
-                    <strong>{t.category}</strong>
-                    {t.store && <> • {t.store}</>}
-                  </div>
-                  {t.description && (
-                    <div style={{ fontSize: "13px", color: "#777", marginTop: "5px" }}>
-                      {t.description}
-                    </div>
-                  )}
-                </div>
-              ))
-            )}
+        {uploadHistory.length === 0 ? (
+          <p style={{ textAlign: "center", color: "#999", padding: "40px 20px" }}>
+            No upload history yet. Start adding transactions!
+          </p>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table style={historyTableStyle}>
+              <thead>
+                <tr>
+                  <th style={thStyle}>Upload Date</th>
+                  <th style={thStyle}>Type</th>
+                  <th style={thStyle}>Count</th>
+                  <th style={thStyle}>Latest Transaction</th>
+                  <th style={thStyle}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {uploadHistory.map((session) => (
+                  <tr key={session.id}>
+                    <td style={tdStyle}>
+                      {new Date(session.upload_date).toLocaleString()}
+                    </td>
+                    <td style={tdStyle}>
+                      <span style={badgeStyle(session.upload_type)}>
+                        {session.upload_type.toUpperCase()}
+                      </span>
+                    </td>
+                    <td style={tdStyle}>{session.transaction_count}</td>
+                    <td style={tdStyle}>
+                      {session.most_recent_transaction_date
+                        ? new Date(session.most_recent_transaction_date).toLocaleDateString()
+                        : "-"}
+                    </td>
+                    <td style={tdStyle}>
+                      <button
+                        onClick={() => deleteUploadSession(session.id)}
+                        style={deleteButtonStyle}
+                      >
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-        </div>
+        )}
       </div>
-
-      {/* CSV Upload Modal */}
-      {showCSVUpload && (
-        <CSVUpload
-          user={user}
-          fetchTransactions={fetchTransactions}
-          onClose={() => setShowCSVUpload(false)}
-        />
-      )}
     </div>
   );
 }
