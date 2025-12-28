@@ -2,6 +2,7 @@ from pydantic import BaseModel, field_validator
 from typing import Optional, List
 from datetime import date
 
+
 class ParsedTransaction(BaseModel):
     """A single parsed transaction from CSV"""
     date: date
@@ -16,6 +17,7 @@ class ParsedTransaction(BaseModel):
     def none_to_empty(cls, v):
         return v or ""
     
+
 class CSVUploadResponse(BaseModel):
     """Response from CSV upload endpoint"""
     success: bool
@@ -24,7 +26,8 @@ class CSVUploadResponse(BaseModel):
     transaction_count: int
     transactions: List[ParsedTransaction]
     
+
 class BulkTransactionCreate(BaseModel):
     """Schema for creating multiple transactions at once"""
-    transactions: List[dict]  # Each dict has: type, category, store, amount, description, transaction_date
+    transactions: List[dict]  # Each dict has: type, category, store, amount, description, transaction_date, tag
     user_id: int

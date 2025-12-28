@@ -35,7 +35,8 @@ class UploadSessionCreate(BaseModel):
     user_id: int
     upload_type: str  # "bulk" or "manual"
     transaction_count: int = 0
-    most_recent_transaction_date: Optional[date] = None
+    min_transaction_date: Optional[date] = None
+    max_transaction_date: Optional[date] = None
 
 class UploadSessionOut(BaseModel):
     id: int
@@ -43,14 +44,16 @@ class UploadSessionOut(BaseModel):
     upload_type: str
     transaction_count: int
     upload_date: datetime
-    most_recent_transaction_date: Optional[date] = None
+    min_transaction_date: Optional[date] = None
+    max_transaction_date: Optional[date] = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
 
 class UploadSessionUpdate(BaseModel):
     transaction_count: Optional[int] = None
-    most_recent_transaction_date: Optional[date] = None
+    min_transaction_date: Optional[date] = None
+    max_transaction_date: Optional[date] = None
 
 # --- Transactions ---
 class TransactionCreate(BaseModel):

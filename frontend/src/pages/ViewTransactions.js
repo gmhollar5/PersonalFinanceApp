@@ -1,5 +1,39 @@
 import React, { useState, useMemo } from "react";
 
+// Utility function to format date strings without timezone conversion
+const formatDateSafe = (dateString) => {
+  if (!dateString) return "-";
+  // Parse YYYY-MM-DD directly without timezone conversion
+  const [year, month, day] = dateString.split('T')[0].split('-');
+  const date = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+  return date.toLocaleDateString();
+};
+
+// Utility function to format timestamps with timezone abbreviation
+const formatTimestampWithTimezone = (timestamp) => {
+  if (!timestamp) return "-";
+  
+  // Ensure timestamp is treated as UTC by adding 'Z' if not present
+  let utcTimestamp = timestamp;
+  if (typeof timestamp === 'string' && !timestamp.endsWith('Z') && !timestamp.includes('+')) {
+    utcTimestamp = timestamp + 'Z';  // Add 'Z' to indicate UTC
+  }
+  
+  const date = new Date(utcTimestamp);
+  
+  // Format with short timezone name (CST, EST, PST, etc.)
+  const options = {
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZoneName: 'short'  // This gives us CST, EST, PST, etc.
+  };
+  
+  return date.toLocaleString('en-US', options);
+};
+
 function ViewTransactions({ transactions, fetchTransactions }) {
   // Filter states
   const [typeFilter, setTypeFilter] = useState("all");
@@ -46,51 +80,60 @@ function ViewTransactions({ transactions, fetchTransactions }) {
     }
   };
 
-  // Filter transactions
+  // Filter and sort transactions
   const filteredTransactions = useMemo(() => {
-    return transactions.filter((t) => {
-      // Type filter
-      if (typeFilter !== "all" && t.type !== typeFilter) return false;
+    return transactions
+      .filter((t) => {
+        // Type filter
+        if (typeFilter !== "all" && t.type !== typeFilter) return false;
 
-      // Category filter
-      if (categoryFilter && t.category !== categoryFilter) return false;
+        // Category filter
+        if (categoryFilter && t.category !== categoryFilter) return false;
 
-      // Store filter
-      if (storeFilter && t.store !== storeFilter) return false;
+        // Store filter
+        if (storeFilter && t.store !== storeFilter) return false;
 
-      // Tag filter
-      if (tagFilter && t.tag !== tagFilter) return false;
+        // Tag filter
+        if (tagFilter && t.tag !== tagFilter) return false;
 
-      // Description search
-      if (
-        descriptionSearch &&
-        !t.description?.toLowerCase().includes(descriptionSearch.toLowerCase())
-      ) {
-        return false;
-      }
+        // Description search
+        if (
+          descriptionSearch &&
+          !t.description?.toLowerCase().includes(descriptionSearch.toLowerCase())
+        ) {
+          return false;
+        }
 
-      // Date range filter
-      const transactionDate = new Date(t.transaction_date);
-      if (startDate) {
-        const startDateObj = new Date(startDate);
-        startDateObj.setHours(0, 0, 0, 0);
-        transactionDate.setHours(0, 0, 0, 0);
-        if (transactionDate < startDateObj) return false;
-      }
-      if (endDate) {
-        const endDateObj = new Date(endDate);
-        endDateObj.setHours(23, 59, 59, 999);
-        const checkDate = new Date(t.transaction_date);
-        checkDate.setHours(0, 0, 0, 0);
-        if (checkDate > endDateObj) return false;
-      }
+        // Date range filter
+        if (startDate || endDate) {
+          // Parse transaction date safely (YYYY-MM-DD format)
+          const [tYear, tMonth, tDay] = t.transaction_date.split('T')[0].split('-');
+          const transDate = new Date(parseInt(tYear), parseInt(tMonth) - 1, parseInt(tDay));
+          
+          if (startDate) {
+            const [sYear, sMonth, sDay] = startDate.split('-');
+            const startDateObj = new Date(parseInt(sYear), parseInt(sMonth) - 1, parseInt(sDay));
+            if (transDate < startDateObj) return false;
+          }
+          if (endDate) {
+            const [eYear, eMonth, eDay] = endDate.split('-');
+            const endDateObj = new Date(parseInt(eYear), parseInt(eMonth) - 1, parseInt(eDay));
+            if (transDate > endDateObj) return false;
+          }
+        }
 
-      // Amount range filter
-      if (minAmount && t.amount < parseFloat(minAmount)) return false;
-      if (maxAmount && t.amount > parseFloat(maxAmount)) return false;
+        // Amount range filter
+        if (minAmount && t.amount < parseFloat(minAmount)) return false;
+        if (maxAmount && t.amount > parseFloat(maxAmount)) return false;
 
-      return true;
-    });
+        return true;
+      })
+      .sort((a, b) => {
+        // Sort by transaction_date descending (most recent first)
+        const dateA = new Date(a.transaction_date);
+        const dateB = new Date(b.transaction_date);
+        return dateB - dateA;
+      });
   }, [
     transactions,
     typeFilter,
@@ -438,6 +481,7 @@ function ViewTransactions({ transactions, fetchTransactions }) {
                   <th style={thStyle}>Description</th>
                   <th style={thStyle}>Tag</th>
                   <th style={thStyle}>Source</th>
+                  <th style={thStyle}>Created At</th>
                   <th style={thStyle}>Actions</th>
                 </tr>
               </thead>
@@ -445,7 +489,7 @@ function ViewTransactions({ transactions, fetchTransactions }) {
                 {filteredTransactions.map((t) => (
                   <tr key={t.id} style={rowStyle(t.type)}>
                     <td style={tdStyle}>
-                      {new Date(t.transaction_date).toLocaleDateString()}
+                      {formatDateSafe(t.transaction_date)}
                     </td>
                     <td style={tdStyle}>
                       {t.type.charAt(0).toUpperCase() + t.type.slice(1)}
@@ -467,6 +511,9 @@ function ViewTransactions({ transactions, fetchTransactions }) {
                       ) : (
                         <span style={manualBadgeStyle}>Manual</span>
                       )}
+                    </td>
+                    <td style={tdStyle}>
+                      {formatTimestampWithTimezone(t.created_at)}
                     </td>
                     <td style={tdStyle}>
                       <button

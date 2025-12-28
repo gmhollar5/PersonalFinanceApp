@@ -26,7 +26,8 @@ class UploadSession(Base):
     upload_type = Column(String, nullable=False)  # "bulk" or "manual"
     transaction_count = Column(Integer, default=0, nullable=False)
     upload_date = Column(DateTime, default=datetime.utcnow, nullable=False)
-    most_recent_transaction_date = Column(Date, nullable=True)  # Most recent transaction date in this upload
+    min_transaction_date = Column(Date, nullable=True)  # Earliest transaction date in this upload
+    max_transaction_date = Column(Date, nullable=True)  # Most recent transaction date in this upload
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     
     user = relationship("User", back_populates="upload_sessions")

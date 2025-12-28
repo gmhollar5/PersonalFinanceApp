@@ -71,9 +71,10 @@ function CSVUpload({ user, fetchTransactions, onClose }) {
         amount: t.amount,
         type: t.type,
         category: t.suggested_category || "",
+        tag: "", // NEW: Add tag field
         original_type: t.original_type,
         selected: true,
-        reviewed: false, // Track if reviewed in one-by-one mode
+        reviewed: false,
       }));
 
       setParsedTransactions(transactionsWithEdit);
@@ -145,7 +146,7 @@ function CSVUpload({ user, fetchTransactions, onClose }) {
       setCurrentIndex((prev) => prev + 1);
     } else {
       // Finished reviewing all
-      setStep("review"); // Go back to table view to see final state
+      setStep("review");
     }
   };
 
@@ -176,6 +177,13 @@ function CSVUpload({ user, fetchTransactions, onClose }) {
       return;
     }
 
+    // NEW: Check for missing store (now required)
+    const missingStore = selectedTransactions.find((t) => !t.store);
+    if (missingStore) {
+      setError("Please provide a store name for all transactions before importing");
+      return;
+    }
+
     setIsLoading(true);
     setError(null);
 
@@ -183,10 +191,12 @@ function CSVUpload({ user, fetchTransactions, onClose }) {
       const transactionsToCreate = selectedTransactions.map((t) => ({
         type: t.type,
         category: t.category,
-        store: t.store || null,
+        store: t.store, // Now required
         amount: t.amount,
         description: t.description || null,
+        tag: t.tag || null, // NEW: Include tag
         transaction_date: t.date,
+        is_bulk_upload: true, // NEW: Mark as bulk upload
       }));
 
       const res = await fetch("/transactions/bulk-create", {
@@ -445,10 +455,11 @@ function CSVUpload({ user, fetchTransactions, onClose }) {
             <tr>
               <th style={thStyle}>✓</th>
               <th style={thStyle}>Date</th>
-              <th style={thStyle}>Store</th>
+              <th style={thStyle}>Store *</th>
               <th style={thStyle}>Type</th>
               <th style={thStyle}>Amount</th>
-              <th style={thStyle}>Category</th>
+              <th style={thStyle}>Category *</th>
+              <th style={thStyle}>Tag</th>
               <th style={thStyle}>Description</th>
             </tr>
           </thead>
@@ -474,9 +485,15 @@ function CSVUpload({ user, fetchTransactions, onClose }) {
                     type="text"
                     value={t.store}
                     onChange={(e) => updateTransaction(t.id, "store", e.target.value)}
-                    style={{ ...inputStyle, padding: "4px 6px", fontSize: "11px", width: "100%" }}
+                    style={{ 
+                      ...inputStyle, 
+                      padding: "4px 6px", 
+                      fontSize: "11px", 
+                      width: "100%",
+                      backgroundColor: !t.store ? "#fff3e0" : "white"
+                    }}
                     disabled={!t.selected}
-                    placeholder="Store name"
+                    placeholder="Store name *"
                   />
                 </td>
                 <td style={tdStyle}>
@@ -518,6 +535,16 @@ function CSVUpload({ user, fetchTransactions, onClose }) {
                     ))}
                   </select>
                 </td>
+                <td style={{ ...tdStyle, maxWidth: "100px" }}>
+                  <input
+                    type="text"
+                    value={t.tag}
+                    onChange={(e) => updateTransaction(t.id, "tag", e.target.value)}
+                    style={{ ...inputStyle, padding: "4px 6px", fontSize: "11px", width: "100%" }}
+                    disabled={!t.selected}
+                    placeholder="Optional tag"
+                  />
+                </td>
                 <td style={{ ...tdStyle, maxWidth: "120px" }}>
                   <input
                     type="text"
@@ -555,7 +582,6 @@ function CSVUpload({ user, fetchTransactions, onClose }) {
     const isLastTransaction = currentIndex === parsedTransactions.length - 1;
     const isFinished = currentIndex >= parsedTransactions.length;
 
-    // Show completion message when done
     if (isFinished) {
       const selectedAfterReview = parsedTransactions.filter((t) => t.selected).length;
       return (
@@ -614,7 +640,7 @@ function CSVUpload({ user, fetchTransactions, onClose }) {
             padding: "15px",
             border: "1px solid #e0e0e0",
           }}>
-            {/* Header row with date, type, and amount */}
+            {/* Header row */}
             <div style={{ 
               display: "flex", 
               justifyContent: "space-between", 
@@ -649,17 +675,24 @@ function CSVUpload({ user, fetchTransactions, onClose }) {
               </div>
             </div>
 
-            {/* Form fields in a more compact layout */}
+            {/* Form fields */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
               <div>
                 <label style={{ fontSize: "12px", fontWeight: "bold", color: "#333", display: "block", marginBottom: "3px" }}>
-                  Store
+                  Store *
                 </label>
                 <input
                   type="text"
                   value={current.store}
                   onChange={(e) => updateCurrentTransaction("store", e.target.value)}
-                  style={{ ...inputStyle, fontSize: "13px", padding: "8px", width: "100%", boxSizing: "border-box" }}
+                  style={{ 
+                    ...inputStyle, 
+                    fontSize: "13px", 
+                    padding: "8px", 
+                    width: "100%", 
+                    boxSizing: "border-box",
+                    backgroundColor: !current.store ? "#fff3e0" : "white"
+                  }}
                   placeholder="Store name"
                 />
               </div>
@@ -689,16 +722,29 @@ function CSVUpload({ user, fetchTransactions, onClose }) {
                 </select>
               </div>
 
-              <div style={{ gridColumn: "1 / -1" }}>
+              <div>
                 <label style={{ fontSize: "12px", fontWeight: "bold", color: "#333", display: "block", marginBottom: "3px" }}>
-                  Description / Notes
+                  Tag (Optional)
+                </label>
+                <input
+                  type="text"
+                  value={current.tag}
+                  onChange={(e) => updateCurrentTransaction("tag", e.target.value)}
+                  style={{ ...inputStyle, fontSize: "13px", padding: "8px", width: "100%", boxSizing: "border-box" }}
+                  placeholder="e.g., vacation"
+                />
+              </div>
+
+              <div>
+                <label style={{ fontSize: "12px", fontWeight: "bold", color: "#333", display: "block", marginBottom: "3px" }}>
+                  Description
                 </label>
                 <input
                   type="text"
                   value={current.description}
                   onChange={(e) => updateCurrentTransaction("description", e.target.value)}
                   style={{ ...inputStyle, fontSize: "13px", padding: "8px", width: "100%", boxSizing: "border-box" }}
-                  placeholder="Add optional notes..."
+                  placeholder="Optional notes"
                 />
               </div>
             </div>
@@ -731,7 +777,7 @@ function CSVUpload({ user, fetchTransactions, onClose }) {
               padding: "10px 24px",
               fontSize: "14px"
             }}
-            disabled={!current?.category}
+            disabled={!current?.category || !current?.store}
           >
             ✓ {isLastTransaction ? "Save & Finish" : "Save & Next"}
           </button>

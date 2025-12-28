@@ -8,9 +8,11 @@ from io import StringIO
 from datetime import datetime
 from typing import List, Tuple
 
+
 def parse_date(date_str: str) -> datetime:
     """Parse date string in YYYY-MM-DD format"""
     return datetime.strptime(date_str, "%Y-%m-%d").date()
+
 
 def categorize_sofi_transaction(transaction_type: str, description: str) -> Tuple[str, str]:
     """
@@ -134,7 +136,7 @@ def categorize_capital_one_transaction(description: str) -> Tuple[str, str]:
     online_shopping_keywords = ["amazon", "ebay", "etsy", "wayfair", "overstock",
                                 "zappos", "6pm", "asos", "shein", "wish.com",
                                 "gymshark", "hey dude", "buckle", "sierra", "atolea",
-                                "freefly", "beard club", "sierra"]
+                                "freefly", "beard club"]
     if any(kw in description_lower for kw in online_shopping_keywords):
         return "Shopping", "expense"
     
@@ -269,9 +271,9 @@ def parse_capital_one_csv(content: str) -> List[dict]:
             else:
                 continue  # Skip rows with no amount
             
-            # Determine store - use description, None for payments
+            # Determine store - use description, skip autopay payments
             store = original_description
-            if suggested_category == "Payment/Credit" and original_description == "CAPITAL ONE AUTOPAY PYMT":
+            if suggested_category == "Payment/Credit" and "CAPITAL ONE AUTOPAY PYMT" in original_description:
                 continue
             
             transactions.append({

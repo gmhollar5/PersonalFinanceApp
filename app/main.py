@@ -1,10 +1,13 @@
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from datetime import datetime
+from datetime import datetime, date
 from . import models, schemas
 from .database import engine, get_db
+from .csv_parser import parse_csv
+from .schemas_csv import CSVUploadResponse, BulkTransactionCreate, ParsedTransaction
 from passlib.context import CryptContext
+from typing import Optional
 
 # Create all tables
 models.Base.metadata.create_all(bind=engine)
@@ -315,6 +318,140 @@ def delete_transaction(transaction_id: int, db: Session = Depends(get_db)):
     except Exception as e:
         db.rollback()
         print(f"❌ Error deleting transaction: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+
+# ------------------- CSV Import -------------------
+@app.post("/transactions/parse-csv", response_model=CSVUploadResponse)
+async def parse_csv_file(
+    file: UploadFile = File(...),
+    bank_type: Optional[str] = Form(default="auto")
+):
+    """
+    Parse a CSV file and return transactions for review.
+    bank_type options: 'auto', 'sofi', 'capital_one'
+    """
+    try:
+        # Read file content
+        content = await file.read()
+        content_str = content.decode("utf-8-sig")  # Handle BOM if present
+        
+        # Parse CSV using csv_parser module
+        detected_type, transactions = parse_csv(content_str, bank_type)
+        
+        # Convert to response format
+        parsed_transactions = [
+            ParsedTransaction(
+                date=t["date"],
+                description=t["description"],
+                original_type=t["original_type"],
+                amount=t["amount"],
+                type=t["type"],
+                suggested_category=t.get("suggested_category"),
+                store=t.get("store")
+            )
+            for t in transactions
+        ]
+        
+        print(f"✅ Parsed {len(transactions)} transactions from CSV ({detected_type})")
+        
+        return CSVUploadResponse(
+            success=True,
+            message=f"Successfully parsed {len(transactions)} transactions",
+            bank_type=detected_type,
+            transaction_count=len(transactions),
+            transactions=parsed_transactions
+        )
+        
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        print(f"❌ Error parsing CSV: {e}")
+        raise HTTPException(status_code=500, detail=f"Error parsing CSV: {str(e)}")
+
+
+@app.post("/transactions/bulk-create")
+async def bulk_create_transactions(
+    data: BulkTransactionCreate,
+    db: Session = Depends(get_db)
+):
+    """
+    Create multiple transactions at once.
+    Used after reviewing parsed CSV transactions.
+    """
+    try:
+        # Verify user exists
+        user = db.query(models.User).filter(models.User.id == data.user_id).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Create bulk upload session
+        upload_session = models.UploadSession(
+            user_id=data.user_id,
+            upload_type="bulk",
+            transaction_count=len(data.transactions),
+            upload_date=datetime.utcnow()
+        )
+        db.add(upload_session)
+        db.flush()  # Get the session ID
+        
+        # All transactions will have the same created_at timestamp
+        bulk_timestamp = datetime.utcnow()
+        
+        # Track date range
+        transaction_dates = []
+        created_transactions = []
+        errors = []
+        
+        for idx, trans_dict in enumerate(data.transactions):
+            try:
+                # Parse transaction_date if it's a string
+                trans_date = trans_dict["transaction_date"]
+                if isinstance(trans_date, str):
+                    trans_date = datetime.strptime(trans_date, "%Y-%m-%d").date()
+                    print(f"Converted date from '{trans_dict['transaction_date']}' to {trans_date} (type: {type(trans_date)})")
+                
+                # Create transaction with bulk upload flag
+                db_transaction = models.Transaction(
+                    type=trans_dict["type"],
+                    category=trans_dict["category"],
+                    store=trans_dict["store"],
+                    amount=trans_dict["amount"],
+                    description=trans_dict.get("description"),
+                    tag=trans_dict.get("tag"),
+                    transaction_date=trans_date,  # Use parsed date object
+                    is_bulk_upload=True,
+                    upload_session_id=upload_session.id,
+                    created_at=bulk_timestamp,  # Same timestamp for all
+                    user_id=data.user_id
+                )
+                db.add(db_transaction)
+                created_transactions.append(db_transaction)
+                transaction_dates.append(trans_date)
+                
+            except Exception as e:
+                errors.append(f"Row {idx + 1}: {str(e)}")
+        
+        # Update session with date range
+        if transaction_dates:
+            upload_session.max_transaction_date = max(transaction_dates)
+            upload_session.min_transaction_date = min(transaction_dates)
+        
+        db.commit()
+        
+        print(f"✅ Bulk import: {len(created_transactions)} transactions created")
+        
+        return {
+            "created_count": len(created_transactions),
+            "errors": errors,
+            "session_id": upload_session.id
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        print(f"❌ Error in bulk create: {e}")
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 # ------------------- Accounts -------------------
