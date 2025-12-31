@@ -177,7 +177,6 @@ function CSVUpload({ user, fetchTransactions, onClose }) {
       return;
     }
 
-    // NEW: Check for missing store (now required)
     const missingStore = selectedTransactions.find((t) => !t.store);
     if (missingStore) {
       setError("Please provide a store name for all transactions before importing");
@@ -188,15 +187,40 @@ function CSVUpload({ user, fetchTransactions, onClose }) {
     setError(null);
 
     try {
+      // STEP 1: Create upload session
+      const sessionRes = await fetch("/upload-sessions/", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: user.id,
+          upload_type: "bulk",
+          transaction_count: selectedTransactions.length,
+        }),
+      });
+
+      if (!sessionRes.ok) {
+        throw new Error("Failed to create upload session");
+      }
+
+      const session = await sessionRes.json();
+      const uploadSessionId = session.id;
+
+      // STEP 2: Calculate date range
+      const dates = selectedTransactions.map(t => new Date(t.date));
+      const minDate = new Date(Math.min(...dates)).toISOString().split('T')[0];
+      const maxDate = new Date(Math.max(...dates)).toISOString().split('T')[0];
+
+      // STEP 3: Create transactions with session ID
       const transactionsToCreate = selectedTransactions.map((t) => ({
         type: t.type,
         category: t.category,
-        store: t.store, // Now required
+        store: t.store,
         amount: t.amount,
         description: t.description || null,
-        tag: t.tag || null, // NEW: Include tag
+        tag: t.tag || null,
         transaction_date: t.date,
-        is_bulk_upload: true, // NEW: Mark as bulk upload
+        is_bulk_upload: true,
+        upload_session_id: uploadSessionId,  // ADDED: Link to session
       }));
 
       const res = await fetch("/transactions/bulk-create", {
@@ -214,6 +238,17 @@ function CSVUpload({ user, fetchTransactions, onClose }) {
       }
 
       const data = await res.json();
+
+      // STEP 4: Update session with date range
+      await fetch(`/upload-sessions/${uploadSessionId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          min_transaction_date: minDate,
+          max_transaction_date: maxDate,
+        }),
+      });
+
       setImportStats(data);
       setStep("complete");
       fetchTransactions();

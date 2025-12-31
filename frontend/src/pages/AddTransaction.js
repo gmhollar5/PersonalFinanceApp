@@ -36,15 +36,22 @@ const formatTimestampWithTimezone = (timestamp) => {
 };
 
 function AddTransaction({ user, transactions, fetchTransactions }) {
+  // Helper function to get today's date in local timezone (not UTC)
+  const getTodayLocal = () => {
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const day = String(today.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
   const [type, setType] = useState("expense");
   const [category, setCategory] = useState("");
   const [store, setStore] = useState("");
   const [amount, setAmount] = useState("");
   const [description, setDescription] = useState("");
   const [tag, setTag] = useState("");
-  const [transactionDate, setTransactionDate] = useState(
-    new Date().toISOString().split("T")[0]
-  );
+  const [transactionDate, setTransactionDate] = useState(getTodayLocal());
   
   // CSV Upload modal state
   const [showCSVUpload, setShowCSVUpload] = useState(false);
@@ -74,6 +81,13 @@ function AddTransaction({ user, transactions, fetchTransactions }) {
     fetchUploadHistory();
     setSessionStartTime(new Date().toISOString());
   }, [user.id]);
+
+  // Refresh upload history when transaction count changes
+  useEffect(() => {
+    if (user && user.id && transactions) {
+      fetchUploadHistory();
+    }
+  }, [transactions.length]);
 
   // Create manual session when user starts adding transactions
   const ensureManualSession = async () => {
@@ -200,7 +214,7 @@ function AddTransaction({ user, transactions, fetchTransactions }) {
       setDescription("");
       setStore("");
       setTag("");
-      setTransactionDate(new Date().toISOString().split("T")[0]);
+      setTransactionDate(getTodayLocal());
     } catch (err) {
       console.error(err);
       alert(`Error adding transaction: ${err.message}`);

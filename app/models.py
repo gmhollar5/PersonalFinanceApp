@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime, Date
+from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime, Date, Boolean
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from .database import Base
@@ -14,6 +14,22 @@ class User(Base):
     transactions = relationship("Transaction", back_populates="user")
     account_definitions = relationship("AccountDefinition", back_populates="user")
     account_records = relationship("AccountRecord", back_populates="user")
+    upload_sessions = relationship("UploadSession", back_populates="user")
+
+
+class UploadSession(Base):
+    """Tracks upload sessions for grouping transactions"""
+    __tablename__ = "upload_sessions"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    upload_type = Column(String, nullable=False)  # "manual" or "bulk"
+    upload_date = Column(DateTime, default=datetime.utcnow)
+    transaction_count = Column(Integer, default=0)
+    min_transaction_date = Column(Date, nullable=True)
+    max_transaction_date = Column(Date, nullable=True)
+
+    user = relationship("User", back_populates="upload_sessions")
+    transactions = relationship("Transaction", back_populates="upload_session")
 
 
 class Transaction(Base):
@@ -24,11 +40,15 @@ class Transaction(Base):
     store = Column(String, nullable=True)
     amount = Column(Float, nullable=False)
     description = Column(String, nullable=True)
+    tag = Column(String, nullable=True)
     transaction_date = Column(Date, nullable=False)
-    date_added = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    is_bulk_upload = Column(Boolean, default=False)
+    upload_session_id = Column(Integer, ForeignKey("upload_sessions.id"), nullable=True)
     user_id = Column(Integer, ForeignKey("users.id"))
 
     user = relationship("User", back_populates="transactions")
+    upload_session = relationship("UploadSession", back_populates="transactions")
 
 
 class AccountDefinition(Base):

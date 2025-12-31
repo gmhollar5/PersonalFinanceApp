@@ -28,6 +28,30 @@ class LoginCredentials(BaseModel):
     email: str
     password: str
 
+# --- Upload Sessions ---
+class UploadSessionCreate(BaseModel):
+    user_id: int
+    upload_type: str  # "manual" or "bulk"
+    transaction_count: int = 0
+    min_transaction_date: Optional[date] = None
+    max_transaction_date: Optional[date] = None
+
+class UploadSessionUpdate(BaseModel):
+    transaction_count: Optional[int] = None
+    min_transaction_date: Optional[date] = None
+    max_transaction_date: Optional[date] = None
+
+class UploadSessionOut(BaseModel):
+    id: int
+    user_id: int
+    upload_type: str
+    upload_date: datetime
+    transaction_count: int
+    min_transaction_date: Optional[date] = None
+    max_transaction_date: Optional[date] = None
+
+    model_config = {"from_attributes": True}
+
 # --- Transactions ---
 class TransactionCreate(BaseModel):
     type: str
@@ -35,7 +59,10 @@ class TransactionCreate(BaseModel):
     store: Optional[str] = None
     amount: float
     description: Optional[str] = None
+    tag: Optional[str] = None
     transaction_date: date
+    is_bulk_upload: bool = False
+    upload_session_id: Optional[int] = None
     user_id: int
 
 class TransactionOut(BaseModel):
@@ -45,8 +72,11 @@ class TransactionOut(BaseModel):
     store: Optional[str] = None
     amount: float
     description: Optional[str] = None
+    tag: Optional[str] = None
     transaction_date: date
-    date_added: datetime
+    created_at: datetime
+    is_bulk_upload: bool
+    upload_session_id: Optional[int] = None
 
     model_config = {"from_attributes": True}
 

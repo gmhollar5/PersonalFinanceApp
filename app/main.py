@@ -85,6 +85,102 @@ def get_all_users(db: Session = Depends(get_db)):
     users = db.query(models.User).all()
     return users
 
+# ------------------- Upload Sessions -------------------
+@app.post("/upload-sessions/", response_model=schemas.UploadSessionOut)
+def create_upload_session(session: schemas.UploadSessionCreate, db: Session = Depends(get_db)):
+    """Create a new upload session"""
+    try:
+        user = db.query(models.User).filter(models.User.id == session.user_id).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        db_session = models.UploadSession(**session.model_dump())
+        db.add(db_session)
+        db.commit()
+        db.refresh(db_session)
+        
+        print(f"✅ Upload session created: ID {db_session.id} ({db_session.upload_type})")
+        return db_session
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        print(f"❌ Error creating upload session: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+@app.get("/upload-sessions/user/{user_id}", response_model=list[schemas.UploadSessionOut])
+def get_user_upload_sessions(user_id: int, db: Session = Depends(get_db)):
+    """Get all upload sessions for a user"""
+    try:
+        sessions = db.query(models.UploadSession).filter(
+            models.UploadSession.user_id == user_id
+        ).order_by(models.UploadSession.upload_date.desc()).all()
+        
+        return sessions
+        
+    except Exception as e:
+        print(f"❌ Error fetching upload sessions: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+@app.patch("/upload-sessions/{session_id}", response_model=schemas.UploadSessionOut)
+def update_upload_session(session_id: int, session_update: schemas.UploadSessionUpdate, db: Session = Depends(get_db)):
+    """Update an upload session"""
+    try:
+        db_session = db.query(models.UploadSession).filter(
+            models.UploadSession.id == session_id
+        ).first()
+        
+        if not db_session:
+            raise HTTPException(status_code=404, detail="Upload session not found")
+        
+        update_data = session_update.model_dump(exclude_unset=True)
+        for key, value in update_data.items():
+            setattr(db_session, key, value)
+        
+        db.commit()
+        db.refresh(db_session)
+        
+        print(f"✅ Upload session updated: ID {db_session.id}")
+        return db_session
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        print(f"❌ Error updating upload session: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+@app.delete("/upload-sessions/{session_id}")
+def delete_upload_session(session_id: int, db: Session = Depends(get_db)):
+    """Delete an upload session and all its transactions"""
+    try:
+        db_session = db.query(models.UploadSession).filter(
+            models.UploadSession.id == session_id
+        ).first()
+        
+        if not db_session:
+            raise HTTPException(status_code=404, detail="Upload session not found")
+        
+        # Delete all transactions in this session
+        db.query(models.Transaction).filter(
+            models.Transaction.upload_session_id == session_id
+        ).delete()
+        
+        # Delete the session
+        db.delete(db_session)
+        db.commit()
+        
+        print(f"✅ Upload session deleted: ID {session_id}")
+        return {"success": True, "message": "Upload session deleted"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        print(f"❌ Error deleting upload session: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
 # ------------------- Transactions -------------------
 @app.post("/transactions/", response_model=schemas.TransactionOut)
 def create_transaction(transaction: schemas.TransactionCreate, db: Session = Depends(get_db)):
@@ -121,6 +217,59 @@ def get_user_transactions(user_id: int, db: Session = Depends(get_db)):
         
     except Exception as e:
         print(f"❌ Error fetching transactions: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+@app.delete("/transactions/{transaction_id}")
+def delete_transaction(transaction_id: int, db: Session = Depends(get_db)):
+    """Delete a specific transaction and update its upload session"""
+    try:
+        transaction = db.query(models.Transaction).filter(
+            models.Transaction.id == transaction_id
+        ).first()
+        
+        if not transaction:
+            raise HTTPException(status_code=404, detail="Transaction not found")
+        
+        upload_session_id = transaction.upload_session_id
+        
+        # Delete the transaction
+        db.delete(transaction)
+        db.commit()
+        
+        # Update the upload session if it exists
+        if upload_session_id:
+            session = db.query(models.UploadSession).filter(
+                models.UploadSession.id == upload_session_id
+            ).first()
+            
+            if session:
+                # Get remaining transactions in this session
+                remaining_transactions = db.query(models.Transaction).filter(
+                    models.Transaction.upload_session_id == upload_session_id
+                ).all()
+                
+                if len(remaining_transactions) == 0:
+                    # No more transactions, delete the session
+                    db.delete(session)
+                else:
+                    # Update session count and date range
+                    session.transaction_count = len(remaining_transactions)
+                    
+                    # Recalculate date range
+                    dates = [t.transaction_date for t in remaining_transactions]
+                    session.min_transaction_date = min(dates)
+                    session.max_transaction_date = max(dates)
+                
+                db.commit()
+        
+        print(f"✅ Transaction deleted: ID {transaction_id}")
+        return {"success": True, "message": "Transaction deleted"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        print(f"❌ Error deleting transaction: {e}")
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 @app.post("/transactions/parse-csv", response_model=CSVUploadResponse)
@@ -199,7 +348,10 @@ async def bulk_create_transactions(
                     store=t.get("store") or None,
                     amount=float(t["amount"]),
                     description=t.get("description") or None,
+                    tag=t.get("tag") or None,
                     transaction_date=trans_date,
+                    is_bulk_upload=t.get("is_bulk_upload", False),
+                    upload_session_id=t.get("upload_session_id"),
                     user_id=data.user_id
                 )
                 db.add(db_transaction)
@@ -248,7 +400,10 @@ def create_bulk_transactions_alt(data: BulkTransactionCreate, db: Session = Depe
                     store=t.get("store") or None,
                     amount=float(t["amount"]),
                     description=t.get("description") or None,
+                    tag=t.get("tag") or None,
                     transaction_date=trans_date,
+                    is_bulk_upload=t.get("is_bulk_upload", False),
+                    upload_session_id=t.get("upload_session_id"),
                     user_id=data.user_id
                 )
                 db.add(db_transaction)
@@ -475,63 +630,15 @@ def get_record_dates(user_id: int, db: Session = Depends(get_db)):
             models.AccountRecord.record_date.desc()
         ).all()
         
-        return [d[0] for d in dates]
+        return [{"date": d[0]} for d in dates]
         
     except Exception as e:
         print(f"❌ Error fetching record dates: {e}")
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
-@app.get("/account-records/user/{user_id}/latest")
-def get_latest_account_records(user_id: int, db: Session = Depends(get_db)):
-    """Get the most recent record for each account"""
-    try:
-        # Get the latest date
-        latest_date_query = db.query(
-            func.max(models.AccountRecord.record_date)
-        ).filter(
-            models.AccountRecord.user_id == user_id
-        ).scalar()
-        
-        if not latest_date_query:
-            return []
-        
-        # Get all records for the latest date
-        records = db.query(
-            models.AccountRecord,
-            models.AccountDefinition.name,
-            models.AccountDefinition.category
-        ).join(
-            models.AccountDefinition,
-            models.AccountRecord.account_definition_id == models.AccountDefinition.id
-        ).filter(
-            models.AccountRecord.user_id == user_id,
-            models.AccountRecord.record_date == latest_date_query
-        ).order_by(
-            models.AccountDefinition.category,
-            models.AccountDefinition.name
-        ).all()
-        
-        result = []
-        for record, name, category in records:
-            result.append({
-                "id": record.id,
-                "account_definition_id": record.account_definition_id,
-                "account_name": name,
-                "category": category,
-                "balance": record.balance,
-                "record_date": record.record_date,
-                "created_at": record.created_at
-            })
-        
-        return result
-        
-    except Exception as e:
-        print(f"❌ Error fetching latest account records: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
-
 @app.get("/account-records/analytics/{user_id}")
 def get_account_analytics(user_id: int, db: Session = Depends(get_db)):
-    """Get analytics data for account tracker (net worth trends, category trends, etc.)"""
+    """Get account analytics including net worth history and trends"""
     try:
         # Get all records with account info
         records = db.query(
@@ -580,8 +687,7 @@ def get_account_analytics(user_id: int, db: Session = Depends(get_db)):
             elif category == "debt":
                 by_date[date_key]["debt"] += record.balance
             
-            account_key = f"{name}_{category}"
-            by_date[date_key]["accounts"][account_key] = record.balance
+            by_date[date_key]["accounts"][name] = record.balance
         
         # Calculate net worth for each date
         net_worth_history = []
@@ -590,51 +696,54 @@ def get_account_analytics(user_id: int, db: Session = Depends(get_db)):
             net_worth = data["liquid"] + data["investments"] - data["debt"]
             net_worth_history.append({
                 "date": date_key,
-                "liquid": data["liquid"],
-                "investments": data["investments"],
-                "debt": data["debt"],
                 "net_worth": net_worth
             })
         
-        # Calculate changes
+        # Get current net worth
         current_net_worth = net_worth_history[-1]["net_worth"] if net_worth_history else 0
         
-        # Month over month
-        today = date.today()
-        month_ago = today - timedelta(days=30)
-        month_ago_records = [r for r in net_worth_history if datetime.strptime(r["date"], "%Y-%m-%d").date() <= month_ago]
-        month_ago_net_worth = month_ago_records[-1]["net_worth"] if month_ago_records else 0
-        mom_change = current_net_worth - month_ago_net_worth
-        mom_percent = (mom_change / month_ago_net_worth * 100) if month_ago_net_worth != 0 else 0
+        # Calculate month-over-month change
+        mom_change = 0
+        mom_percent = 0
+        if len(net_worth_history) >= 2:
+            prev_month = net_worth_history[-2]["net_worth"]
+            mom_change = current_net_worth - prev_month
+            if prev_month != 0:
+                mom_percent = (mom_change / abs(prev_month)) * 100
         
-        # Year over year
-        year_ago = today - timedelta(days=365)
-        year_ago_records = [r for r in net_worth_history if datetime.strptime(r["date"], "%Y-%m-%d").date() <= year_ago]
-        year_ago_net_worth = year_ago_records[-1]["net_worth"] if year_ago_records else 0
-        yoy_change = current_net_worth - year_ago_net_worth
-        yoy_percent = (yoy_change / year_ago_net_worth * 100) if year_ago_net_worth != 0 else 0
+        # Calculate year-over-year change (if we have enough data)
+        yoy_change = 0
+        yoy_percent = 0
+        if len(net_worth_history) >= 12:
+            prev_year = net_worth_history[-12]["net_worth"]
+            yoy_change = current_net_worth - prev_year
+            if prev_year != 0:
+                yoy_percent = (yoy_change / abs(prev_year)) * 100
         
-        # All time
-        first_net_worth = net_worth_history[0]["net_worth"] if net_worth_history else 0
-        all_time_change = current_net_worth - first_net_worth
+        # Calculate all-time change
+        all_time_change = 0
+        if net_worth_history:
+            first_net_worth = net_worth_history[0]["net_worth"]
+            all_time_change = current_net_worth - first_net_worth
         
         # Build category history
         category_history = {
-            "liquid": [{"date": r["date"], "value": r["liquid"]} for r in net_worth_history],
-            "investments": [{"date": r["date"], "value": r["investments"]} for r in net_worth_history],
-            "debt": [{"date": r["date"], "value": r["debt"]} for r in net_worth_history]
+            "liquid": [{"date": d["date"], "value": by_date[d["date"]]["liquid"]} for d in net_worth_history],
+            "investments": [{"date": d["date"], "value": by_date[d["date"]]["investments"]} for d in net_worth_history],
+            "debt": [{"date": d["date"], "value": by_date[d["date"]]["debt"]} for d in net_worth_history]
         }
         
-        # Build account history
+        # Build account history (all unique accounts)
+        all_accounts = set()
+        for data in by_date.values():
+            all_accounts.update(data["accounts"].keys())
+        
         account_history = {}
-        for date_key in sorted(by_date.keys()):
-            for account_key, balance in by_date[date_key]["accounts"].items():
-                if account_key not in account_history:
-                    account_history[account_key] = []
-                account_history[account_key].append({
-                    "date": date_key,
-                    "value": balance
-                })
+        for account in all_accounts:
+            account_history[account] = [
+                {"date": d["date"], "value": by_date[d["date"]]["accounts"].get(account, 0)}
+                for d in net_worth_history
+            ]
         
         return {
             "current_net_worth": current_net_worth,
@@ -683,5 +792,5 @@ def read_root():
     return {
         "status": "ok",
         "message": "Personal Finance API is running",
-        "version": "3.0"  # Updated for new account tracker schema
+        "version": "3.1"  # Updated for upload sessions support
     }
