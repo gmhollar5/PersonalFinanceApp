@@ -383,7 +383,7 @@ function AddTransaction({ user, transactions, fetchTransactions }) {
 
           {/* Type */}
           <div style={inputRowStyle}>
-            <label style={labelStyle}>Type</label>
+            <label style={labelStyle}>Type *</label>
             <select style={inputStyle} value={type} onChange={(e) => setType(e.target.value)}>
               <option value="expense">Expense</option>
               <option value="income">Income</option>

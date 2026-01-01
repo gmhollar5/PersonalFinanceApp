@@ -9,6 +9,11 @@ const formatDateSafe = (dateString) => {
   return date.toLocaleDateString();
 };
 
+// Utility function to format currency
+const formatCurrency = (amount) => {
+  return `${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+};
+
 // Utility function to format timestamps with timezone abbreviation
 const formatTimestampWithTimezone = (timestamp) => {
   if (!timestamp) return "-";
@@ -307,19 +312,19 @@ function ViewTransactions({ transactions, fetchTransactions }) {
         <div style={summaryItemStyle("#4CAF50")}>
           <h3>Total Income</h3>
           <p style={{ fontSize: "24px", margin: "10px 0" }}>
-            ${totalIncome.toFixed(2)}
+            ${formatCurrency(totalIncome)}
           </p>
         </div>
         <div style={summaryItemStyle("#f44336")}>
           <h3>Total Expenses</h3>
           <p style={{ fontSize: "24px", margin: "10px 0" }}>
-            ${totalExpenses.toFixed(2)}
+            ${formatCurrency(totalExpenses)}
           </p>
         </div>
         <div style={summaryItemStyle("#2196F3")}>
           <h3>Net Balance</h3>
           <p style={{ fontSize: "24px", margin: "10px 0" }}>
-            ${netBalance.toFixed(2)}
+            ${formatCurrency(netBalance)}
           </p>
         </div>
       </div>
@@ -433,7 +438,7 @@ function ViewTransactions({ transactions, fetchTransactions }) {
             <input
               type="number"
               style={inputStyle}
-              placeholder={`Min: $${globalMinAmount.toFixed(2)}`}
+              placeholder={`Min: $${formatCurrency(globalMinAmount)}`}
               value={minAmount}
               onChange={(e) => setMinAmount(e.target.value)}
             />
@@ -445,7 +450,7 @@ function ViewTransactions({ transactions, fetchTransactions }) {
             <input
               type="number"
               style={inputStyle}
-              placeholder={`Max: $${globalMaxAmount.toFixed(2)}`}
+              placeholder={`Max: $${formatCurrency(globalMaxAmount)}`}
               value={maxAmount}
               onChange={(e) => setMaxAmount(e.target.value)}
             />
@@ -496,7 +501,7 @@ function ViewTransactions({ transactions, fetchTransactions }) {
                     </td>
                     <td style={tdStyle}>{t.category}</td>
                     <td style={tdStyle}>{t.store}</td>
-                    <td style={tdStyle}>${t.amount.toFixed(2)}</td>
+                    <td style={tdStyle}>${formatCurrency(t.amount)}</td>
                     <td style={tdStyle}>{t.description || "-"}</td>
                     <td style={tdStyle}>
                       {t.tag ? (
