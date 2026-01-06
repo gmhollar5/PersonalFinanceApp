@@ -106,7 +106,7 @@ def categorize_capital_one_transaction(description: str) -> Tuple[str, str]:
                        "bar", "pub", "taphouse", "tavern", "brewery", "winery",
                        "doordash", "grubhub", "uber eats", "postmates",
                        "parian", "india palace", "quarry", "block", "bunny", "nico",
-                       "o'donovan", "wild boar", "el nuevo"]
+                       "o'donovan", "wild boar", "el nuevo", "canes", "spitz", "poke"]
     if any(kw in description_lower for kw in dining_keywords):
         return "Dining", "expense"
     
@@ -118,7 +118,7 @@ def categorize_capital_one_transaction(description: str) -> Tuple[str, str]:
         return "Groceries", "expense"
     
     # Gas/Automotive
-    gas_keywords = ["gas", "fuel", "shell", "exxon", "mobil", "chevron", "bp ", 
+    gas_keywords = ["gas", "fuel", "shell", "exxon", "mobil", "chevron", "bp", 
                     "marathon", "speedway", "kwik trip", "holiday station", "costco gas",
                     "arco", "valero", "phillips 66", "circle k"]
     if any(kw in description_lower for kw in gas_keywords):
@@ -136,7 +136,7 @@ def categorize_capital_one_transaction(description: str) -> Tuple[str, str]:
     online_shopping_keywords = ["amazon", "ebay", "etsy", "wayfair", "overstock",
                                 "zappos", "6pm", "asos", "shein", "wish.com",
                                 "gymshark", "hey dude", "buckle", "sierra", "atolea",
-                                "freefly", "beard club"]
+                                "freefly", "beard club", "patina"]
     if any(kw in description_lower for kw in online_shopping_keywords):
         return "Shopping", "expense"
     
@@ -153,7 +153,7 @@ def categorize_capital_one_transaction(description: str) -> Tuple[str, str]:
     health_keywords = ["pharmacy", "doctor", "medical", "hospital", "clinic", 
                        "dental", "dentist", "vision", "eye", "gym", "fitness", 
                        "planet fit", "la fitness", "anytime fitness", "orangetheory", 
-                       "crossfit", "yoga", "peloton", "jello"]
+                       "crossfit", "yoga", "peloton", "jello", "gnc"]
     if any(kw in description_lower for kw in health_keywords):
         return "Health & Fitness", "expense"
     
