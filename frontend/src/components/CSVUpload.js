@@ -4,32 +4,31 @@ import React, { useState, useRef } from "react";
 // REFINED CATEGORY LISTS (matching constants.py and AddTransaction.js)
 // =============================================================================
 const EXPENSE_CATEGORIES = [
-  "Car Payment",
   "Dining Out",
-  "Education",
   "Entertainment",
   "Gas & Auto",
   "Gifts",
+  "Education",
   "Groceries",
   "Health & Fitness",
   "Household",
-  "Other Expense",
+  "Subscriptions",
   "Phone",
-  "Recreation",
   "Rent",
   "Shopping",
   "Student Loan",
-  "Subscriptions",
   "Travel",
-  "Utilities"
+  "Car Payment",
+  "Utilities",
+  "Other Expense"
 ];
 
 const INCOME_CATEGORIES = [
-  "Gift",
+  "Salary",
   "Interest",
-  "Other Income",
   "Refund",
-  "Salary"
+  "Gift",
+  "Other Income"
 ];
 
 function CSVUpload({ user, fetchTransactions, onClose }) {

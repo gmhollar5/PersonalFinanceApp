@@ -9,7 +9,6 @@ const EXPENSE_CATEGORIES = [
   "Entertainment",
   "Gas & Auto",
   "Gifts",
-  "Recreation",
   "Education",
   "Groceries",
   "Health & Fitness",
@@ -35,17 +34,13 @@ const INCOME_CATEGORIES = [
 
 // Tag suggestions by category
 const CATEGORY_TAGS = {
-  "Dining Out": ["restaurant", "food", "lunch", "dinner"],
-  "Entertainment": ["movie", "concert", "show", "game"],
-  "Gas & Auto": ["fuel", "car", "maintenance"],
-  "Gifts": ["birthday", "holiday", "present"],
-  "Recreation": ["golf", "sports", "hobby"],
-  "Education": ["school", "tuition", "books"],
-  "Groceries": ["food", "weekly", "shopping"],
-  "Health & Fitness": ["gym", "health", "medical"],
-  "Household": ["home", "supplies", "cleaning"],
-  "Subscriptions": ["monthly", "streaming", "app"],
-  "Travel": ["trip", "vacation", "flight"],
+    "Entertainment": ["movie", "concert", "golf", "game", "fun"],
+    "Gas & Auto": ["gas", "oil", "maintenance"],
+    "Gifts": ["birthday", "holiday", "anniversary"],
+    "Shopping": ["retail", "online",  "amazon"],
+    "Travel": ["vacation"],
+    "Utilities": ["electric", "water", "gas", "internet"],
+    "Refund": ["return", "reimbursement"],
 };
 
 // =============================================================================

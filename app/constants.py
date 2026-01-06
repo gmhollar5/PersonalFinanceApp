@@ -21,13 +21,12 @@ Each section has clear instructions on how to add your own rules!
 # =============================================================================
 EXPENSE_CATEGORIES = [
     "Dining Out",
-    "Entertainment",
+    "Entertainment",    # Includes bars, alcohol, golf, hobbies, etc
     "Gas & Auto",
     "Gifts",
-    "Recreation",  # Includes golf, sports, hobbies
     "Education",   # Includes grad school, courses, books
     "Groceries",
-    "Health & Fitness",
+    "Health & Fitness", # medical, gym, etc
     "Household",   # Home supplies, hygiene, cleaning
     "Subscriptions",  # Netflix, Spotify, apps, etc.
     "Phone",
@@ -81,6 +80,8 @@ STORE_PATTERNS = {
     # Groceries & Retail
     "target": "Target",
     "walmart": "Walmart",
+    "wlmt": "Walmart",
+    "wmt": "Walmart",
     "costco": "Costco",
     "sam's club": "Sam's Club",
     "sams club": "Sam's Club",
@@ -130,6 +131,7 @@ STORE_PATTERNS = {
     "circle k": "Circle K",
     "7-eleven": "7-Eleven",
     "7 eleven": "7-Eleven",
+    "costco gas": "Costco Gas",
     
     # Subscriptions & Services
     "netflix": "Netflix",
@@ -169,7 +171,13 @@ STORE_PATTERNS = {
     "24 hour": "24 Hour Fitness",
     
     # Add your own patterns here:
-    # "pattern_to_match": "Clean Store Name",
+    "cowboy jacks": "Cowboy Jacks",
+    "byerlys": "Lunds & Byerlys",
+    "wm supercenter": "Walmart",
+    "wal-mart": "Walmart",
+    "wholefds": "Whole Foods",
+    "wholefoods": "Whole Foods",
+    "kohls": "Kohls"
 }
 
 # Exact match mapping (must match exactly, case-insensitive)
@@ -224,9 +232,12 @@ def normalize_store(store: str) -> str:
     cleaned = re.sub(r'\s+\d{4,}', '', cleaned)  # Remove 4+ digit numbers at end
     cleaned = re.sub(r'Mktpl[ace]*\s*', '', cleaned)  # Remove "Mktpl", "Mktplace"
     cleaned = re.sub(r'Pmts?\s*', '', cleaned)  # Remove "Pmt", "Pmts"
+    cleaned = re.sub(r'.com', '', cleaned)
+    cleaned = re.sub(r'.Com', '', cleaned) 
+
     
     # Remove common business suffixes
-    suffixes = ['Inc', 'LLC', 'Corp', 'Ltd', 'Co', 'Company']
+    suffixes = ['Inc', 'LLC', 'Corp', 'Ltd', 'Co', 'Company', 'US']
     for suffix in suffixes:
         # Remove suffix if at end with optional period
         cleaned = re.sub(rf'\s+{suffix}\.?$', '', cleaned, flags=re.IGNORECASE)
@@ -245,8 +256,7 @@ def normalize_store(store: str) -> str:
 CATEGORY_MAPPING = {
     # Normalize old names to new names (case-insensitive)
     "fun money": "Entertainment",
-    "fun money/entertainment": "Entertainment",
-    "golf": "Recreation",
+    "golf": "Entertainment",
     "grad school": "Education",
     "home & hygiene": "Household",
     "netflix": "Subscriptions",
@@ -290,20 +300,20 @@ def categorize_by_store(store_name: str) -> str:
     if any(s in store_lower for s in ['mcdonald', 'burger king', 'taco bell', 'chipotle', 'subway', 'kfc', 'wendys', 'chick-fil-a', 'popeyes']):
         return "Dining Out"
     
-    # Dining Out - Restaurants & Coffee
-    if any(s in store_lower for s in ['starbucks', 'dunkin', 'restaurant', 'cafe', 'coffee', 'pizza', 'panera']):
+    # Dining Out - Restaurants
+    if any(s in store_lower for s in ['starbucks', 'poke', 'restaurant', 'cafe', 'coffee', 'pizza', 'panera', 'spitz', 'bistro']):
         return "Dining Out"
     
     # Gas & Auto
-    if any(s in store_lower for s in ['shell', 'chevron', 'exxon', 'mobil', 'bp', 'gas', 'fuel']):
+    if any(s in store_lower for s in ['shell', 'chevron', 'exxon', 'mobil', 'bp', 'gas', 'fuel', 'costco gas']):
         return "Gas & Auto"
     
     # Subscriptions
-    if any(s in store_lower for s in ['netflix', 'spotify', 'hulu', 'disney', 'apple music', 'icloud', 'dropbox']):
+    if any(s in store_lower for s in ['netflix', 'spotify', 'hulu', 'disney', 'apple music', 'icloud', 'dropbox', 'apple']):
         return "Subscriptions"
     
     # Online Shopping
-    if any(s in store_lower for s in ['amazon', 'ebay', 'etsy']):
+    if any(s in store_lower for s in ['amazon', 'ebay', 'etsy', 'patina', 'sierra', 'kohls', 'hollister', 'american eagle', 'lulu lemon']):
         return "Shopping"
     
     # Health & Fitness
@@ -316,7 +326,7 @@ def categorize_by_store(store_name: str) -> str:
         return "Phone"  # Default to Phone, user can adjust
     
     # Transportation
-    if any(s in store_lower for s in ['uber', 'lyft']):
+    if any(s in store_lower for s in ['uber', 'lyft', "plane", "delta", "airline", "sun country"]):
         return "Travel"
     
     # Add your own store categorization rules here:
@@ -341,15 +351,15 @@ def categorize_by_keywords(description: str, transaction_type: str = "") -> str:
         return "Interest"
     
     # Salary/Payroll
-    if any(word in desc_lower for word in ['payroll', 'salary', 'direct deposit']):
+    if any(word in desc_lower for word in ['payroll', 'salary', 'direct deposit', "best buy", "bby", "northern", "nte", "pcb", "post consumer brand"]):
         return "Salary"
     
     # Rent
-    if any(word in desc_lower for word in ['rent', 'apartment', 'housing']):
+    if any(word in desc_lower for word in ['rent', 'apartment', 'housing', "alcott", "whitecap", "nolo"]):
         return "Rent"
     
     # Utilities
-    if any(word in desc_lower for word in ['electric', 'water', 'utility', 'gas bill', 'internet']):
+    if any(word in desc_lower for word in ['electric', 'water', 'utility', 'gas bill', 'internet', "xcel", "centerpoint", "quantum"]):
         return "Utilities"
     
     # Student Loan
@@ -357,7 +367,7 @@ def categorize_by_keywords(description: str, transaction_type: str = "") -> str:
         return "Student Loan"
     
     # Car Payment
-    if any(word in desc_lower for word in ['auto loan', 'car payment', 'vehicle loan']):
+    if any(word in desc_lower for word in ['auto loan', 'car payment', 'vehicle loan', "truck loan" , "southpoint"]):
         return "Car Payment"
     
     # Add your own keyword categorization rules here:
@@ -414,30 +424,21 @@ def get_automatic_tags(store: str, category: str, amount: float, description: st
     if category == "Subscriptions":
         tags.append("recurring")
     
-    # Rent tag
-    if category == "Rent":
-        tags.append("recurring")
-        tags.append("housing")
-    
     # Golf tag (if you play golf)
-    if any(word in store_lower for word in ['golf', 'pga', 'course']) or any(word in desc_lower for word in ['golf', 'tee time']):
+    if any(word in store_lower for word in ['golf', 'pga', 'course', "club"]) or any(word in desc_lower for word in ['golf', 'tee time', "club", "course"]):
         tags.append("golf")
     
     # Vacation/Travel tag
     if any(word in store_lower for word in ['airline', 'hotel', 'airbnb', 'booking.com', 'expedia']):
         tags.append("vacation")
     
-    # Large purchase tag (over $500)
-    if amount > 500:
-        tags.append("large")
-    
     # Weekly groceries tag
-    if category == "Groceries":
-        tags.append("weekly")
+    if category == "Groceries" | category == "Dining Out":
+        tags.append("food")
     
     # Add your own automatic tagging rules here:
     # if 'condition' in store_lower:
-    #     tags.append("your_tag")
+    #     tags.append("your_tag")'
     
     return tags
 
@@ -453,27 +454,13 @@ def get_automatic_tags(store: str, category: str, amount: float, description: st
 # =============================================================================
 
 CATEGORY_TAGS = {
-    "Dining Out": ["restaurant", "food", "lunch", "dinner", "breakfast"],
-    "Entertainment": ["movie", "concert", "show", "game", "fun"],
-    "Gas & Auto": ["fuel", "gas", "car", "maintenance", "auto"],
-    "Gifts": ["birthday", "holiday", "anniversary", "present"],
-    "Recreation": ["golf", "sports", "hobby", "activity", "game"],
-    "Education": ["school", "tuition", "books", "course", "learning"],
-    "Groceries": ["food", "household", "weekly", "shopping"],
-    "Health & Fitness": ["gym", "health", "medical", "fitness", "doctor"],
-    "Household": ["home", "supplies", "cleaning", "hygiene"],
-    "Subscriptions": ["monthly", "streaming", "app", "service"],
-    "Phone": ["mobile", "cellular", "phone", "plan"],
-    "Rent": ["housing", "apartment", "home", "monthly"],
-    "Shopping": ["retail", "online", "clothes", "amazon"],
-    "Student Loan": ["loan", "education", "debt", "payment"],
-    "Travel": ["trip", "vacation", "flight", "hotel", "airbnb"],
-    "Car Payment": ["auto", "vehicle", "loan", "car"],
-    "Utilities": ["electric", "water", "gas", "internet", "bill"],
-    "Salary": ["income", "paycheck", "work", "employment"],
-    "Interest": ["bank", "savings", "investment"],
+    "Entertainment": ["movie", "concert", "golf", "game", "fun"],
+    "Gas & Auto": ["gas", "oil", "maintenance"],
+    "Gifts": ["birthday", "holiday", "anniversary"],
+    "Shopping": ["retail", "online",  "amazon"],
+    "Travel": ["vacation"],
+    "Utilities": ["electric", "water", "gas", "internet"],
     "Refund": ["return", "reimbursement"],
-    "Gift": ["present", "money"],
     
     # Add your own category → suggested tags here:
     # "Your Category": ["tag1", "tag2", "tag3"],
@@ -489,7 +476,7 @@ def suggest_tags(category: str, store: str = "") -> list:
     
     # Add category-based tags
     if category in CATEGORY_TAGS:
-        suggestions.extend(CATEGORY_TAGS[category][:3])  # Top 3 suggestions
+        suggestions.extend(CATEGORY_TAGS[category][:4])  # Top 4 suggestions
     
     # Add store-specific tags if applicable
     if store:
