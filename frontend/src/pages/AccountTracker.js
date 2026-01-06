@@ -75,7 +75,7 @@ function LineChart({ data, width = 600, height = 300, color = "#4CAF50", title =
                 fill="#666"
                 textAnchor="middle"
               >
-                {new Date(p.label).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                {formatDateForGraph(p.label)}
               </text>
             )}
           </g>
@@ -83,6 +83,14 @@ function LineChart({ data, width = 600, height = 300, color = "#4CAF50", title =
       </svg>
     </div>
   );
+}
+
+// Helper function to format date for graph (local timezone)
+function formatDateForGraph(dateString) {
+  // Parse YYYY-MM-DD as local date
+  const [year, month, day] = dateString.split('-').map(Number);
+  const date = new Date(year, month - 1, day);
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
 function AccountTracker({ user }) {
@@ -99,20 +107,29 @@ function AccountTracker({ user }) {
   
   // Create record modal
   const [showCreateRecordModal, setShowCreateRecordModal] = useState(false);
-  const [recordDate, setRecordDate] = useState(new Date().toISOString().split('T')[0]);
+  const [recordDate, setRecordDate] = useState(getTodayLocalDate());
   const [recordBalances, setRecordBalances] = useState({});
   
   // View controls
   const [selectedGraphView, setSelectedGraphView] = useState("net_worth");
-  const [showDetailedTable, setShowDetailedTable] = useState(false); // false = summary (default), true = detailed
+  const [showDetailedTable, setShowDetailedTable] = useState(false);
+  const [showClosedAccounts, setShowClosedAccounts] = useState(false);
+
+  // Get today's date in YYYY-MM-DD format (local timezone)
+  function getTodayLocalDate() {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
 
   const formatCurrency = (amount) => `$${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
   // Format date from YYYY-MM-DD to local display (no timezone conversion)
   const formatDateLocal = (dateString) => {
-    // Parse YYYY-MM-DD as a local date (not UTC) to avoid day shifting
     const [year, month, day] = dateString.split('-').map(Number);
-    const date = new Date(year, month - 1, day); // month is 0-indexed
+    const date = new Date(year, month - 1, day);
     return date.toLocaleDateString('en-US', { 
       year: 'numeric', 
       month: 'short', 
@@ -120,15 +137,13 @@ function AccountTracker({ user }) {
     });
   };
 
-  // Get timezone name for display
-  const getTimezone = () => {
-    return "Local Date";
-  };
+  const getTimezone = () => "Local Date";
 
   // Fetch data
   const fetchAccountDefinitions = async () => {
     try {
-      const res = await fetch(`/account-definitions/user/${user.id}`);
+      // Always fetch ALL accounts (including closed) - filtering happens in frontend
+      const res = await fetch(`/account-definitions/user/${user.id}?include_closed=true`);
       if (!res.ok) throw new Error("Failed to fetch account definitions");
       const data = await res.json();
       setAccountDefinitions(Array.isArray(data) ? data : []);
@@ -182,8 +197,8 @@ function AccountTracker({ user }) {
     return latest;
   }, [accountRecords]);
 
-  // Group accounts by category with latest balances
-  const accountsByCategory = useMemo(() => {
+  // Group accounts by category with latest balances (ALL accounts for table/graph)
+  const allAccountsByCategory = useMemo(() => {
     const grouped = {
       liquid: [],
       investments: [],
@@ -201,6 +216,54 @@ function AccountTracker({ user }) {
     // Sort by balance within each category
     Object.keys(grouped).forEach(category => {
       grouped[category].sort((a, b) => b.latestBalance - a.latestBalance);
+    });
+
+    return grouped;
+  }, [accountDefinitions, latestBalances]);
+
+  // Group accounts by category - FILTERED for account list display
+  const accountsByCategory = useMemo(() => {
+    const grouped = {
+      liquid: [],
+      investments: [],
+      debt: []
+    };
+
+    // Filter by active status based on toggle
+    const filteredAccounts = showClosedAccounts 
+      ? accountDefinitions 
+      : accountDefinitions.filter(acct => acct.is_active);
+
+    filteredAccounts.forEach((acct) => {
+      const latestBalance = latestBalances[acct.id]?.balance || 0;
+      grouped[acct.category].push({
+        ...acct,
+        latestBalance
+      });
+    });
+
+    // Sort by balance within each category
+    Object.keys(grouped).forEach(category => {
+      grouped[category].sort((a, b) => b.latestBalance - a.latestBalance);
+    });
+
+    return grouped;
+  }, [accountDefinitions, latestBalances, showClosedAccounts]);
+
+  // Get only active accounts for new records
+  const activeAccountsByCategory = useMemo(() => {
+    const grouped = {
+      liquid: [],
+      investments: [],
+      debt: []
+    };
+
+    accountDefinitions.filter(acct => acct.is_active).forEach((acct) => {
+      const latestBalance = latestBalances[acct.id]?.balance || 0;
+      grouped[acct.category].push({
+        ...acct,
+        latestBalance
+      });
     });
 
     return grouped;
@@ -232,12 +295,9 @@ function AccountTracker({ user }) {
 
       await fetchAccountDefinitions();
       
-      // Show success message and clear form, but KEEP the category selection
       setAccountAddedMessage(`✅ "${newAccountName}" added successfully!`);
       setNewAccountName("");
-      // NOTE: We do NOT reset newAccountCategory here - it stays the same
       
-      // Clear success message after 3 seconds
       setTimeout(() => setAccountAddedMessage(""), 3000);
     } catch (err) {
       console.error(err);
@@ -247,9 +307,69 @@ function AccountTracker({ user }) {
     }
   };
 
-  // Delete account
+  // Close account (keeps historical data)
+  const handleCloseAccount = async (accountId, accountName) => {
+    if (!window.confirm(`Close "${accountName}"? This will stop future entries but keep all historical records. You can reactivate it later if needed.`)) {
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const res = await fetch(`/account-definitions/${accountId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ is_active: false })
+      });
+
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.detail || "Error closing account");
+      }
+
+      await fetchAccountDefinitions();
+      await fetchAnalytics();
+      alert(`"${accountName}" has been closed. Historical data is preserved.`);
+    } catch (err) {
+      console.error(err);
+      alert(`Error closing account: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Reactivate account
+  const handleReactivateAccount = async (accountId, accountName) => {
+    if (!window.confirm(`Reactivate "${accountName}"? This will allow future entries for this account.`)) {
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const res = await fetch(`/account-definitions/${accountId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ is_active: true })
+      });
+
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.detail || "Error reactivating account");
+      }
+
+      await fetchAccountDefinitions();
+      await fetchAnalytics();
+      alert(`"${accountName}" has been reactivated!`);
+    } catch (err) {
+      console.error(err);
+      alert(`Error reactivating account: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Delete account (removes all data)
   const handleDeleteAccount = async (accountId, accountName) => {
-    if (!window.confirm(`Are you sure you want to delete "${accountName}"? This will also delete all historical records for this account.`)) {
+    if (!window.confirm(`Are you sure you want to DELETE "${accountName}"? This will permanently remove this account and ALL its historical records. This cannot be undone!\n\nIf you just want to stop using this account, consider "Close Account" instead.`)) {
       return;
     }
 
@@ -267,7 +387,7 @@ function AccountTracker({ user }) {
       await fetchAccountDefinitions();
       await fetchAccountRecords();
       await fetchAnalytics();
-      alert(`"${accountName}" deleted successfully!`);
+      alert(`"${accountName}" permanently deleted!`);
     } catch (err) {
       console.error(err);
       alert(`Error deleting account: ${err.message}`);
@@ -278,26 +398,29 @@ function AccountTracker({ user }) {
 
   // Create new record
   const handleCreateRecord = async () => {
-    if (accountDefinitions.length === 0) {
-      alert("Please add some accounts first");
+    const activeAccounts = accountDefinitions.filter(acct => acct.is_active);
+    
+    if (activeAccounts.length === 0) {
+      alert("Please add some active accounts first");
       return;
     }
 
-    // Initialize balances with latest values
+    // Initialize balances with latest values for ACTIVE accounts only
     const balances = {};
-    accountDefinitions.forEach((acct) => {
+    activeAccounts.forEach((acct) => {
       balances[acct.id] = latestBalances[acct.id]?.balance || 0;
     });
     setRecordBalances(balances);
     
-    // Reset date to today
-    setRecordDate(new Date().toISOString().split('T')[0]);
+    // Reset date to today (local timezone)
+    setRecordDate(getTodayLocalDate());
     
     setShowCreateRecordModal(true);
   };
 
   const handleSaveRecord = async () => {
-    const records = accountDefinitions.map((acct) => ({
+    const activeAccounts = accountDefinitions.filter(acct => acct.is_active);
+    const records = activeAccounts.map((acct) => ({
       account_definition_id: acct.id,
       balance: parseFloat(recordBalances[acct.id] || 0)
     }));
@@ -340,10 +463,8 @@ function AccountTracker({ user }) {
 
     setLoading(true);
     try {
-      // Get all record IDs for this date
       const recordsToDelete = accountRecords.filter(r => r.record_date === date);
       
-      // Delete each record
       for (const record of recordsToDelete) {
         const res = await fetch(`/account-records/${record.id}`, {
           method: "DELETE"
@@ -375,11 +496,24 @@ function AccountTracker({ user }) {
       const category = selectedGraphView.split("_")[1];
       return analytics.category_history[category] || [];
     } else if (selectedGraphView.startsWith("account_")) {
-      const accountKey = selectedGraphView.replace("account_", "");
-      return analytics.account_history[accountKey] || [];
+      // Extract account ID from the selected view
+      const accountId = parseInt(selectedGraphView.replace("account_", ""));
+      
+      // Find the account definition
+      const account = accountDefinitions.find(acct => acct.id === accountId);
+      if (!account) return [];
+      
+      // Backend uses account NAME as the key in account_history
+      if (analytics.account_history && analytics.account_history[account.name]) {
+        return analytics.account_history[account.name];
+      }
+      
+      // If no match found, return empty array
+      console.warn(`No data found for account: ${account.name} (ID: ${accountId}). Available keys:`, Object.keys(analytics.account_history || {}));
+      return [];
     }
     return [];
-  }, [analytics, selectedGraphView]);
+  }, [analytics, selectedGraphView, accountDefinitions]);
 
   const graphColor = useMemo(() => {
     if (selectedGraphView === "net_worth") return "#4CAF50";
@@ -389,7 +523,7 @@ function AccountTracker({ user }) {
     return "#4CAF50";
   }, [selectedGraphView]);
 
-  // Summary table data - grouped by date with individual accounts and % changes
+  // Summary table data
   const summaryTableData = useMemo(() => {
     const byDate = {};
     
@@ -401,7 +535,7 @@ function AccountTracker({ user }) {
           liquid: 0,
           investments: 0,
           debt: 0,
-          accountBalances: {}, // Store individual account balances
+          accountBalances: {},
           accounts: []
         };
       }
@@ -414,10 +548,8 @@ function AccountTracker({ user }) {
         byDate[dateKey].debt += record.balance;
       }
       
-      // Store individual account balance
       const accountKey = `${record.account_definition_id}`;
       byDate[dateKey].accountBalances[accountKey] = record.balance;
-      
       byDate[dateKey].accounts.push(record);
     });
     
@@ -426,10 +558,8 @@ function AccountTracker({ user }) {
       netWorth: row.liquid + row.investments - row.debt
     })).sort((a, b) => new Date(b.date) - new Date(a.date));
     
-    // Calculate percentage changes from previous record
     return sorted.map((row, index) => {
       if (index === sorted.length - 1) {
-        // First record (oldest), no previous to compare
         return { ...row, changes: {} };
       }
       
@@ -442,7 +572,6 @@ function AccountTracker({ user }) {
         accounts: {}
       };
       
-      // Calculate % change for each individual account
       Object.keys(row.accountBalances).forEach(accountKey => {
         const currentBalance = row.accountBalances[accountKey];
         const prevBalance = prevRow.accountBalances[accountKey] || 0;
@@ -484,7 +613,6 @@ function AccountTracker({ user }) {
 
       {/* Top Row: Analytics Cards + Buttons */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: "15px", marginBottom: "20px" }}>
-        {/* Current Net Worth */}
         <div style={{...cardStyle, textAlign: "center"}}>
           <div style={{ fontSize: "12px", color: "#999", marginBottom: "5px" }}>Current Net Worth</div>
           <div style={{ fontSize: "24px", fontWeight: "bold", color: "#4CAF50" }}>
@@ -492,7 +620,6 @@ function AccountTracker({ user }) {
           </div>
         </div>
 
-        {/* Month over Month */}
         <div style={{...cardStyle, textAlign: "center"}}>
           <div style={{ fontSize: "12px", color: "#999", marginBottom: "5px" }}>Month over Month</div>
           <div style={{ fontSize: "18px", fontWeight: "bold", color: analytics && analytics.month_over_month_change >= 0 ? "#4CAF50" : "#ff4444" }}>
@@ -507,7 +634,6 @@ function AccountTracker({ user }) {
           </div>
         </div>
 
-        {/* Year over Year */}
         <div style={{...cardStyle, textAlign: "center"}}>
           <div style={{ fontSize: "12px", color: "#999", marginBottom: "5px" }}>Year over Year</div>
           <div style={{ fontSize: "18px", fontWeight: "bold", color: analytics && analytics.year_over_year_change >= 0 ? "#4CAF50" : "#ff4444" }}>
@@ -522,7 +648,6 @@ function AccountTracker({ user }) {
           </div>
         </div>
 
-        {/* All Time Change */}
         <div style={{...cardStyle, textAlign: "center"}}>
           <div style={{ fontSize: "12px", color: "#999", marginBottom: "5px" }}>All Time Change</div>
           <div style={{ fontSize: "18px", fontWeight: "bold", color: analytics && analytics.all_time_change >= 0 ? "#4CAF50" : "#ff4444" }}>
@@ -530,7 +655,6 @@ function AccountTracker({ user }) {
           </div>
         </div>
 
-        {/* Buttons */}
         <div style={{ display: "flex", flexDirection: "column", gap: "10px", justifyContent: "center" }}>
           <button onClick={handleCreateRecord} style={buttonStyle}>
             + New Record
@@ -545,42 +669,92 @@ function AccountTracker({ user }) {
       <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: "20px", marginBottom: "20px", height: "500px" }}>
         {/* Account List */}
         <div style={{...cardStyle, overflowY: "auto"}}>
-          <h3 style={{ marginTop: 0, marginBottom: "15px", color: "#333" }}>Accounts</h3>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "15px" }}>
+            <h3 style={{ margin: 0, color: "#333" }}>Accounts</h3>
+            <button
+              onClick={() => setShowClosedAccounts(!showClosedAccounts)}
+              style={{
+                ...secondaryButtonStyle,
+                padding: "6px 12px",
+                fontSize: "12px",
+                backgroundColor: showClosedAccounts ? "#ff9800" : "#2196F3"
+              }}
+            >
+              {showClosedAccounts ? "Hide Closed" : "Show Closed"}
+            </button>
+          </div>
           
           {/* Liquid Assets */}
           {accountsByCategory.liquid.length > 0 && (
             <div style={{ marginBottom: "20px" }}>
               <div style={{ fontSize: "14px", fontWeight: "bold", color: "#2196F3", marginBottom: "10px" }}>
-                💰 Liquid ({formatCurrency(accountsByCategory.liquid.reduce((sum, a) => sum + a.latestBalance, 0))})
+                💰 Liquid ({formatCurrency(accountsByCategory.liquid.filter(a => a.is_active).reduce((sum, a) => sum + a.latestBalance, 0))})
               </div>
               {accountsByCategory.liquid.map((acct) => (
                 <div key={acct.id} style={{ 
                   padding: "8px", 
                   marginBottom: "5px", 
-                  backgroundColor: "#f5f5f5", 
+                  backgroundColor: acct.is_active ? "#f5f5f5" : "#e0e0e0",
                   borderRadius: "5px",
                   display: "flex",
                   justifyContent: "space-between",
-                  alignItems: "center"
+                  alignItems: "center",
+                  opacity: acct.is_active ? 1 : 0.6
                 }}>
-                  <span style={{ fontSize: "13px", flex: 1 }}>{acct.name}</span>
+                  <span style={{ fontSize: "13px", flex: 1 }}>
+                    {acct.name}
+                    {!acct.is_active && <span style={{ color: "#999", fontSize: "11px", marginLeft: "8px" }}>(Closed)</span>}
+                  </span>
                   <span style={{ fontSize: "13px", fontWeight: "bold", color: "#2196F3", marginRight: "10px" }}>
                     {formatCurrency(acct.latestBalance)}
                   </span>
-                  <button
-                    onClick={() => handleDeleteAccount(acct.id, acct.name)}
-                    style={{
-                      backgroundColor: "transparent",
-                      border: "none",
-                      color: "#ff4444",
-                      cursor: "pointer",
-                      fontSize: "16px",
-                      padding: "4px 8px"
-                    }}
-                    title="Delete account"
-                  >
-                    🗑️
-                  </button>
+                  <div style={{ display: "flex", gap: "5px" }}>
+                    {acct.is_active ? (
+                      <button
+                        onClick={() => handleCloseAccount(acct.id, acct.name)}
+                        style={{
+                          backgroundColor: "transparent",
+                          border: "none",
+                          color: "#ff9800",
+                          cursor: "pointer",
+                          fontSize: "16px",
+                          padding: "4px 8px"
+                        }}
+                        title="Close account (keeps history)"
+                      >
+                        🔒
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => handleReactivateAccount(acct.id, acct.name)}
+                        style={{
+                          backgroundColor: "transparent",
+                          border: "none",
+                          color: "#4CAF50",
+                          cursor: "pointer",
+                          fontSize: "16px",
+                          padding: "4px 8px"
+                        }}
+                        title="Reactivate account"
+                      >
+                        🔓
+                      </button>
+                    )}
+                    <button
+                      onClick={() => handleDeleteAccount(acct.id, acct.name)}
+                      style={{
+                        backgroundColor: "transparent",
+                        border: "none",
+                        color: "#ff4444",
+                        cursor: "pointer",
+                        fontSize: "16px",
+                        padding: "4px 8px"
+                      }}
+                      title="Delete account (removes all data)"
+                    >
+                      🗑️
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -590,36 +764,73 @@ function AccountTracker({ user }) {
           {accountsByCategory.investments.length > 0 && (
             <div style={{ marginBottom: "20px" }}>
               <div style={{ fontSize: "14px", fontWeight: "bold", color: "#9C27B0", marginBottom: "10px" }}>
-                📈 Investments ({formatCurrency(accountsByCategory.investments.reduce((sum, a) => sum + a.latestBalance, 0))})
+                📈 Investments ({formatCurrency(accountsByCategory.investments.filter(a => a.is_active).reduce((sum, a) => sum + a.latestBalance, 0))})
               </div>
               {accountsByCategory.investments.map((acct) => (
                 <div key={acct.id} style={{ 
                   padding: "8px", 
                   marginBottom: "5px", 
-                  backgroundColor: "#f5f5f5", 
+                  backgroundColor: acct.is_active ? "#f5f5f5" : "#e0e0e0",
                   borderRadius: "5px",
                   display: "flex",
                   justifyContent: "space-between",
-                  alignItems: "center"
+                  alignItems: "center",
+                  opacity: acct.is_active ? 1 : 0.6
                 }}>
-                  <span style={{ fontSize: "13px", flex: 1 }}>{acct.name}</span>
+                  <span style={{ fontSize: "13px", flex: 1 }}>
+                    {acct.name}
+                    {!acct.is_active && <span style={{ color: "#999", fontSize: "11px", marginLeft: "8px" }}>(Closed)</span>}
+                  </span>
                   <span style={{ fontSize: "13px", fontWeight: "bold", color: "#9C27B0", marginRight: "10px" }}>
                     {formatCurrency(acct.latestBalance)}
                   </span>
-                  <button
-                    onClick={() => handleDeleteAccount(acct.id, acct.name)}
-                    style={{
-                      backgroundColor: "transparent",
-                      border: "none",
-                      color: "#ff4444",
-                      cursor: "pointer",
-                      fontSize: "16px",
-                      padding: "4px 8px"
-                    }}
-                    title="Delete account"
-                  >
-                    🗑️
-                  </button>
+                  <div style={{ display: "flex", gap: "5px" }}>
+                    {acct.is_active ? (
+                      <button
+                        onClick={() => handleCloseAccount(acct.id, acct.name)}
+                        style={{
+                          backgroundColor: "transparent",
+                          border: "none",
+                          color: "#ff9800",
+                          cursor: "pointer",
+                          fontSize: "16px",
+                          padding: "4px 8px"
+                        }}
+                        title="Close account (keeps history)"
+                      >
+                        🔒
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => handleReactivateAccount(acct.id, acct.name)}
+                        style={{
+                          backgroundColor: "transparent",
+                          border: "none",
+                          color: "#4CAF50",
+                          cursor: "pointer",
+                          fontSize: "16px",
+                          padding: "4px 8px"
+                        }}
+                        title="Reactivate account"
+                      >
+                        🔓
+                      </button>
+                    )}
+                    <button
+                      onClick={() => handleDeleteAccount(acct.id, acct.name)}
+                      style={{
+                        backgroundColor: "transparent",
+                        border: "none",
+                        color: "#ff4444",
+                        cursor: "pointer",
+                        fontSize: "16px",
+                        padding: "4px 8px"
+                      }}
+                      title="Delete account (removes all data)"
+                    >
+                      🗑️
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -629,36 +840,73 @@ function AccountTracker({ user }) {
           {accountsByCategory.debt.length > 0 && (
             <div>
               <div style={{ fontSize: "14px", fontWeight: "bold", color: "#ff4444", marginBottom: "10px" }}>
-                💳 Debt ({formatCurrency(accountsByCategory.debt.reduce((sum, a) => sum + a.latestBalance, 0))})
+                💳 Debt ({formatCurrency(accountsByCategory.debt.filter(a => a.is_active).reduce((sum, a) => sum + a.latestBalance, 0))})
               </div>
               {accountsByCategory.debt.map((acct) => (
                 <div key={acct.id} style={{ 
                   padding: "8px", 
                   marginBottom: "5px", 
-                  backgroundColor: "#f5f5f5", 
+                  backgroundColor: acct.is_active ? "#f5f5f5" : "#e0e0e0",
                   borderRadius: "5px",
                   display: "flex",
                   justifyContent: "space-between",
-                  alignItems: "center"
+                  alignItems: "center",
+                  opacity: acct.is_active ? 1 : 0.6
                 }}>
-                  <span style={{ fontSize: "13px", flex: 1 }}>{acct.name}</span>
+                  <span style={{ fontSize: "13px", flex: 1 }}>
+                    {acct.name}
+                    {!acct.is_active && <span style={{ color: "#999", fontSize: "11px", marginLeft: "8px" }}>(Closed)</span>}
+                  </span>
                   <span style={{ fontSize: "13px", fontWeight: "bold", color: "#ff4444", marginRight: "10px" }}>
                     {formatCurrency(acct.latestBalance)}
                   </span>
-                  <button
-                    onClick={() => handleDeleteAccount(acct.id, acct.name)}
-                    style={{
-                      backgroundColor: "transparent",
-                      border: "none",
-                      color: "#ff4444",
-                      cursor: "pointer",
-                      fontSize: "16px",
-                      padding: "4px 8px"
-                    }}
-                    title="Delete account"
-                  >
-                    🗑️
-                  </button>
+                  <div style={{ display: "flex", gap: "5px" }}>
+                    {acct.is_active ? (
+                      <button
+                        onClick={() => handleCloseAccount(acct.id, acct.name)}
+                        style={{
+                          backgroundColor: "transparent",
+                          border: "none",
+                          color: "#ff9800",
+                          cursor: "pointer",
+                          fontSize: "16px",
+                          padding: "4px 8px"
+                        }}
+                        title="Close account (keeps history)"
+                      >
+                        🔒
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => handleReactivateAccount(acct.id, acct.name)}
+                        style={{
+                          backgroundColor: "transparent",
+                          border: "none",
+                          color: "#4CAF50",
+                          cursor: "pointer",
+                          fontSize: "16px",
+                          padding: "4px 8px"
+                        }}
+                        title="Reactivate account"
+                      >
+                        🔓
+                      </button>
+                    )}
+                    <button
+                      onClick={() => handleDeleteAccount(acct.id, acct.name)}
+                      style={{
+                        backgroundColor: "transparent",
+                        border: "none",
+                        color: "#ff4444",
+                        cursor: "pointer",
+                        fontSize: "16px",
+                        padding: "4px 8px"
+                      }}
+                      title="Delete account (removes all data)"
+                    >
+                      🗑️
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -694,8 +942,8 @@ function AccountTracker({ user }) {
               {accountDefinitions.length > 0 && (
                 <optgroup label="Individual Accounts">
                   {accountDefinitions.map((acct) => (
-                    <option key={acct.id} value={`account_${acct.name}_${acct.category}`}>
-                      {acct.name}
+                    <option key={acct.id} value={`account_${acct.id}`}>
+                      {acct.name} {!acct.is_active && "(Closed)"}
                     </option>
                   ))}
                 </optgroup>
@@ -713,7 +961,7 @@ function AccountTracker({ user }) {
         </div>
       </div>
 
-      {/* Bottom Row: Summary Table with Toggle */}
+      {/* Bottom Row: Summary Table */}
       <div style={cardStyle}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "15px" }}>
           <h3 style={{ margin: 0, color: "#333" }}>Account History</h3>
@@ -732,7 +980,7 @@ function AccountTracker({ user }) {
         ) : (
           <div style={{ overflowX: "auto" }}>
             {!showDetailedTable ? (
-              // SUMMARY VIEW - Aggregated Categories (DEFAULT)
+              // SUMMARY VIEW
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead>
                   <tr style={{ backgroundColor: "#f5f5f5", borderBottom: "2px solid #ddd" }}>
@@ -757,7 +1005,7 @@ function AccountTracker({ user }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {summaryTableData.map((row, rowIndex) => (
+                  {summaryTableData.map((row) => (
                     <tr key={row.date} style={{ borderBottom: "1px solid #f0f0f0" }}>
                       <td style={{ padding: "12px", fontSize: "13px", fontWeight: "500" }}>
                         {formatDateLocal(row.date)}
@@ -838,58 +1086,51 @@ function AccountTracker({ user }) {
                 </tbody>
               </table>
             ) : (
-              // DETAILED VIEW - Individual Account Columns
+              // DETAILED VIEW
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px" }}>
                 <thead>
                   <tr style={{ backgroundColor: "#f5f5f5", borderBottom: "2px solid #ddd" }}>
                     <th style={{ padding: "10px", textAlign: "left", fontSize: "12px", position: "sticky", left: 0, backgroundColor: "#f5f5f5", zIndex: 2 }}>
                       Date ({getTimezone()})
                     </th>
-                    {/* Individual account columns grouped by category */}
-                    {accountsByCategory.liquid.length > 0 && (
-                      <>
-                        <th colSpan={accountsByCategory.liquid.length} style={{ 
-                          padding: "10px", 
-                          textAlign: "center", 
-                          fontSize: "12px", 
-                          backgroundColor: "#e3f2fd", 
-                          color: "#2196F3",
-                          fontWeight: "bold",
-                          borderRight: "2px solid #ddd"
-                        }}>
-                          💰 Liquid Assets
-                        </th>
-                      </>
+                    {allAccountsByCategory.liquid.length > 0 && (
+                      <th colSpan={allAccountsByCategory.liquid.length} style={{ 
+                        padding: "10px", 
+                        textAlign: "center", 
+                        fontSize: "12px", 
+                        backgroundColor: "#e3f2fd", 
+                        color: "#2196F3",
+                        fontWeight: "bold",
+                        borderRight: "2px solid #ddd"
+                      }}>
+                        💰 Liquid Assets
+                      </th>
                     )}
-                    {accountsByCategory.investments.length > 0 && (
-                      <>
-                        <th colSpan={accountsByCategory.investments.length} style={{ 
-                          padding: "10px", 
-                          textAlign: "center", 
-                          fontSize: "12px", 
-                          backgroundColor: "#f3e5f5", 
-                          color: "#9C27B0",
-                          fontWeight: "bold",
-                          borderRight: "2px solid #ddd"
-                        }}>
-                          📈 Investments
-                        </th>
-                      </>
+                    {allAccountsByCategory.investments.length > 0 && (
+                      <th colSpan={allAccountsByCategory.investments.length} style={{ 
+                        padding: "10px", 
+                        textAlign: "center", 
+                        fontSize: "12px", 
+                        backgroundColor: "#f3e5f5", 
+                        color: "#9C27B0",
+                        fontWeight: "bold",
+                        borderRight: "2px solid #ddd"
+                      }}>
+                        📈 Investments
+                      </th>
                     )}
-                    {accountsByCategory.debt.length > 0 && (
-                      <>
-                        <th colSpan={accountsByCategory.debt.length} style={{ 
-                          padding: "10px", 
-                          textAlign: "center", 
-                          fontSize: "12px", 
-                          backgroundColor: "#ffebee", 
-                          color: "#ff4444",
-                          fontWeight: "bold",
-                          borderRight: "2px solid #ddd"
-                        }}>
-                          💳 Debt
-                        </th>
-                      </>
+                    {allAccountsByCategory.debt.length > 0 && (
+                      <th colSpan={allAccountsByCategory.debt.length} style={{ 
+                        padding: "10px", 
+                        textAlign: "center", 
+                        fontSize: "12px", 
+                        backgroundColor: "#ffebee", 
+                        color: "#ff4444",
+                        fontWeight: "bold",
+                        borderRight: "2px solid #ddd"
+                      }}>
+                        💳 Debt
+                      </th>
                     )}
                     <th style={{ padding: "10px", textAlign: "right", fontSize: "12px", backgroundColor: "#e8f5e9", color: "#4CAF50", fontWeight: "bold" }}>
                       Net Worth
@@ -900,14 +1141,13 @@ function AccountTracker({ user }) {
                   </tr>
                   <tr style={{ backgroundColor: "#fafafa", borderBottom: "1px solid #ddd" }}>
                     <th style={{ padding: "6px 10px", fontSize: "11px", position: "sticky", left: 0, backgroundColor: "#fafafa", zIndex: 2 }}></th>
-                    {/* Individual account names */}
-                    {accountsByCategory.liquid.map((acct, idx) => (
+                    {allAccountsByCategory.liquid.map((acct, idx) => (
                       <th key={acct.id} style={{ 
                         padding: "6px 8px", 
                         textAlign: "right", 
                         fontSize: "11px", 
                         color: "#2196F3",
-                        borderRight: idx === accountsByCategory.liquid.length - 1 ? "2px solid #ddd" : "1px solid #e0e0e0",
+                        borderRight: idx === allAccountsByCategory.liquid.length - 1 ? "2px solid #ddd" : "1px solid #e0e0e0",
                         maxWidth: "120px",
                         overflow: "hidden",
                         textOverflow: "ellipsis",
@@ -916,13 +1156,13 @@ function AccountTracker({ user }) {
                         {acct.name}
                       </th>
                     ))}
-                    {accountsByCategory.investments.map((acct, idx) => (
+                    {allAccountsByCategory.investments.map((acct, idx) => (
                       <th key={acct.id} style={{ 
                         padding: "6px 8px", 
                         textAlign: "right", 
                         fontSize: "11px", 
                         color: "#9C27B0",
-                        borderRight: idx === accountsByCategory.investments.length - 1 ? "2px solid #ddd" : "1px solid #e0e0e0",
+                        borderRight: idx === allAccountsByCategory.investments.length - 1 ? "2px solid #ddd" : "1px solid #e0e0e0",
                         maxWidth: "120px",
                         overflow: "hidden",
                         textOverflow: "ellipsis",
@@ -931,13 +1171,13 @@ function AccountTracker({ user }) {
                         {acct.name}
                       </th>
                     ))}
-                    {accountsByCategory.debt.map((acct, idx) => (
+                    {allAccountsByCategory.debt.map((acct, idx) => (
                       <th key={acct.id} style={{ 
                         padding: "6px 8px", 
                         textAlign: "right", 
                         fontSize: "11px", 
                         color: "#ff4444",
-                        borderRight: idx === accountsByCategory.debt.length - 1 ? "2px solid #ddd" : "1px solid #e0e0e0",
+                        borderRight: idx === allAccountsByCategory.debt.length - 1 ? "2px solid #ddd" : "1px solid #e0e0e0",
                         maxWidth: "120px",
                         overflow: "hidden",
                         textOverflow: "ellipsis",
@@ -951,13 +1191,12 @@ function AccountTracker({ user }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {summaryTableData.map((row, rowIndex) => (
+                  {summaryTableData.map((row) => (
                     <tr key={row.date} style={{ borderBottom: "1px solid #f0f0f0" }}>
                       <td style={{ padding: "10px", fontSize: "12px", fontWeight: "500", position: "sticky", left: 0, backgroundColor: "white", zIndex: 1 }}>
                         {formatDateLocal(row.date)}
                       </td>
-                      {/* Liquid account values */}
-                      {accountsByCategory.liquid.map((acct, idx) => {
+                      {allAccountsByCategory.liquid.map((acct, idx) => {
                         const balance = row.accountBalances[acct.id] || 0;
                         const change = row.changes?.accounts?.[acct.id];
                         return (
@@ -965,7 +1204,7 @@ function AccountTracker({ user }) {
                             padding: "10px 8px", 
                             textAlign: "right", 
                             color: "#2196F3",
-                            borderRight: idx === accountsByCategory.liquid.length - 1 ? "2px solid #ddd" : "1px solid #e0e0e0"
+                            borderRight: idx === allAccountsByCategory.liquid.length - 1 ? "2px solid #ddd" : "1px solid #e0e0e0"
                           }}>
                             <div>{formatCurrency(balance)}</div>
                             {change !== undefined && (
@@ -980,8 +1219,7 @@ function AccountTracker({ user }) {
                           </td>
                         );
                       })}
-                      {/* Investment account values */}
-                      {accountsByCategory.investments.map((acct, idx) => {
+                      {allAccountsByCategory.investments.map((acct, idx) => {
                         const balance = row.accountBalances[acct.id] || 0;
                         const change = row.changes?.accounts?.[acct.id];
                         return (
@@ -989,7 +1227,7 @@ function AccountTracker({ user }) {
                             padding: "10px 8px", 
                             textAlign: "right", 
                             color: "#9C27B0",
-                            borderRight: idx === accountsByCategory.investments.length - 1 ? "2px solid #ddd" : "1px solid #e0e0e0"
+                            borderRight: idx === allAccountsByCategory.investments.length - 1 ? "2px solid #ddd" : "1px solid #e0e0e0"
                           }}>
                             <div>{formatCurrency(balance)}</div>
                             {change !== undefined && (
@@ -1004,8 +1242,7 @@ function AccountTracker({ user }) {
                           </td>
                         );
                       })}
-                      {/* Debt account values */}
-                      {accountsByCategory.debt.map((acct, idx) => {
+                      {allAccountsByCategory.debt.map((acct, idx) => {
                         const balance = row.accountBalances[acct.id] || 0;
                         const change = row.changes?.accounts?.[acct.id];
                         return (
@@ -1013,7 +1250,7 @@ function AccountTracker({ user }) {
                             padding: "10px 8px", 
                             textAlign: "right", 
                             color: "#ff4444",
-                            borderRight: idx === accountsByCategory.debt.length - 1 ? "2px solid #ddd" : "1px solid #e0e0e0"
+                            borderRight: idx === allAccountsByCategory.debt.length - 1 ? "2px solid #ddd" : "1px solid #e0e0e0"
                           }}>
                             <div>{formatCurrency(balance)}</div>
                             {change !== undefined && (
@@ -1028,7 +1265,6 @@ function AccountTracker({ user }) {
                           </td>
                         );
                       })}
-                      {/* Net Worth */}
                       <td style={{ 
                         padding: "10px 8px", 
                         textAlign: "right", 
@@ -1047,7 +1283,6 @@ function AccountTracker({ user }) {
                           </div>
                         )}
                       </td>
-                      {/* Delete button */}
                       <td style={{ padding: "10px 8px", textAlign: "center" }}>
                         <button
                           onClick={() => handleDeleteRecord(row.date)}
@@ -1096,7 +1331,6 @@ function AccountTracker({ user }) {
           }}>
             <h3 style={{ marginTop: 0, marginBottom: "20px" }}>Add New Account</h3>
             
-            {/* Success message */}
             {accountAddedMessage && (
               <div style={{
                 backgroundColor: "#d4edda",
@@ -1231,10 +1465,10 @@ function AccountTracker({ user }) {
 
             <div style={{ marginBottom: "20px" }}>
               <div style={{ fontSize: "14px", fontWeight: "bold", marginBottom: "10px" }}>
-                Enter balances for each account:
+                Enter balances for each active account:
               </div>
               
-              {Object.entries(accountsByCategory).map(([category, accounts]) => (
+              {Object.entries(activeAccountsByCategory).map(([category, accounts]) => (
                 accounts.length > 0 && (
                   <div key={category} style={{ marginBottom: "20px" }}>
                     <div style={{ 
@@ -1272,12 +1506,18 @@ function AccountTracker({ user }) {
                   </div>
                 )
               ))}
+              
+              {Object.values(activeAccountsByCategory).every(arr => arr.length === 0) && (
+                <p style={{ color: "#999", textAlign: "center", padding: "20px 0" }}>
+                  No active accounts available. All accounts are closed. Please reactivate or add new accounts.
+                </p>
+              )}
             </div>
 
             <div style={{ display: "flex", gap: "10px" }}>
               <button 
                 onClick={handleSaveRecord} 
-                disabled={loading}
+                disabled={loading || Object.values(activeAccountsByCategory).every(arr => arr.length === 0)}
                 style={{...buttonStyle, flex: 1}}
               >
                 {loading ? "Saving..." : "Save Record"}

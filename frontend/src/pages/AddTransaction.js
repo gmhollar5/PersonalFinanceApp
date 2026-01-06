@@ -1,10 +1,70 @@
 import React, { useState, useEffect } from "react";
 import CSVUpload from "../components/CSVUpload";
 
+// =============================================================================
+// CATEGORY DEFINITIONS (matching backend constants.py)
+// =============================================================================
+const EXPENSE_CATEGORIES = [
+  "Dining Out",
+  "Entertainment",
+  "Gas & Auto",
+  "Gifts",
+  "Recreation",
+  "Education",
+  "Groceries",
+  "Health & Fitness",
+  "Household",
+  "Subscriptions",
+  "Phone",
+  "Rent",
+  "Shopping",
+  "Student Loan",
+  "Travel",
+  "Car Payment",
+  "Utilities",
+  "Other Expense"
+];
+
+const INCOME_CATEGORIES = [
+  "Salary",
+  "Interest",
+  "Refund",
+  "Gift",
+  "Other Income"
+];
+
+// Tag suggestions by category
+const CATEGORY_TAGS = {
+  "Dining Out": ["restaurant", "food", "lunch", "dinner"],
+  "Entertainment": ["movie", "concert", "show", "game"],
+  "Gas & Auto": ["fuel", "car", "maintenance"],
+  "Gifts": ["birthday", "holiday", "present"],
+  "Recreation": ["golf", "sports", "hobby"],
+  "Education": ["school", "tuition", "books"],
+  "Groceries": ["food", "weekly", "shopping"],
+  "Health & Fitness": ["gym", "health", "medical"],
+  "Household": ["home", "supplies", "cleaning"],
+  "Subscriptions": ["monthly", "streaming", "app"],
+  "Travel": ["trip", "vacation", "flight"],
+};
+
+// =============================================================================
+// UTILITY FUNCTIONS
+// =============================================================================
+
+// Format store name to Title Case
+const formatStore = (store) => {
+  if (!store) return "";
+  return store
+    .toLowerCase()
+    .split(' ')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+};
+
 // Utility function to format date strings without timezone conversion
 const formatDateSafe = (dateString) => {
   if (!dateString) return "-";
-  // Parse YYYY-MM-DD directly without timezone conversion
   const [year, month, day] = dateString.split('T')[0].split('-');
   const date = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
   return date.toLocaleDateString();
@@ -14,29 +74,26 @@ const formatDateSafe = (dateString) => {
 const formatTimestampWithTimezone = (timestamp) => {
   if (!timestamp) return "-";
   
-  // Ensure timestamp is treated as UTC by adding 'Z' if not present
   let utcTimestamp = timestamp;
   if (typeof timestamp === 'string' && !timestamp.endsWith('Z') && !timestamp.includes('+')) {
-    utcTimestamp = timestamp + 'Z';  // Add 'Z' to indicate UTC
+    utcTimestamp = timestamp + 'Z';
   }
   
   const date = new Date(utcTimestamp);
-  
-  // Format with short timezone name (CST, EST, PST, etc.)
   const options = {
     year: 'numeric',
     month: 'numeric',
     day: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
-    timeZoneName: 'short'  // This gives us CST, EST, PST, etc.
+    timeZoneName: 'short'
   };
   
   return date.toLocaleString('en-US', options);
 };
 
 function AddTransaction({ user, transactions, fetchTransactions }) {
-  // Helper function to get today's date in local timezone (not UTC)
+  // Helper function to get today's date in local timezone
   const getTodayLocal = () => {
     const today = new Date();
     const year = today.getFullYear();
@@ -53,6 +110,9 @@ function AddTransaction({ user, transactions, fetchTransactions }) {
   const [tag, setTag] = useState("");
   const [transactionDate, setTransactionDate] = useState(getTodayLocal());
   
+  // Smart tag suggestions
+  const [suggestedTags, setSuggestedTags] = useState([]);
+  
   // CSV Upload modal state
   const [showCSVUpload, setShowCSVUpload] = useState(false);
   
@@ -61,13 +121,28 @@ function AddTransaction({ user, transactions, fetchTransactions }) {
   const [currentSessionId, setCurrentSessionId] = useState(null);
   const [sessionStartTime, setSessionStartTime] = useState(null);
 
+  // Update suggested tags when category changes
+  useEffect(() => {
+    if (category && CATEGORY_TAGS[category]) {
+      setSuggestedTags(CATEGORY_TAGS[category]);
+    } else {
+      setSuggestedTags([]);
+    }
+  }, [category]);
+
+  // Auto-format store name when it loses focus
+  const handleStoreBlur = () => {
+    if (store) {
+      setStore(formatStore(store));
+    }
+  };
+
   // Fetch upload history
   const fetchUploadHistory = async () => {
     try {
       const res = await fetch(`/upload-sessions/user/${user.id}`);
       if (!res.ok) throw new Error("Failed to fetch upload history");
       const data = await res.json();
-      // Filter out empty sessions (count = 0)
       const nonEmptySessions = data.filter(session => session.transaction_count > 0);
       setUploadHistory(Array.isArray(nonEmptySessions) ? nonEmptySessions : []);
     } catch (err) {
@@ -76,66 +151,62 @@ function AddTransaction({ user, transactions, fetchTransactions }) {
     }
   };
 
-  // Load upload history on mount
   useEffect(() => {
-    fetchUploadHistory();
-    setSessionStartTime(new Date().toISOString());
-  }, [user.id]);
-
-  // Refresh upload history when transaction count changes
-  useEffect(() => {
-    if (user && user.id && transactions) {
+    if (user) {
       fetchUploadHistory();
     }
-  }, [transactions.length]);
+  }, [user]);
 
-  // Create manual session when user starts adding transactions
+  // Ensure manual session exists
   const ensureManualSession = async () => {
-    if (!currentSessionId) {
-      try {
-        const res = await fetch("/upload-sessions/", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            user_id: user.id,
-            upload_type: "manual",
-            transaction_count: 0,
-          }),
-        });
-        if (!res.ok) throw new Error("Failed to create session");
-        const session = await res.json();
-        setCurrentSessionId(session.id);
-        return session.id;
-      } catch (err) {
-        console.error("Error creating manual session:", err);
-        return null;
-      }
+    if (currentSessionId) {
+      return currentSessionId;
     }
-    return currentSessionId;
+
+    try {
+      const existingSessions = await fetch(`/upload-sessions/user/${user.id}`);
+      const sessions = await existingSessions.json();
+      const manualSession = sessions.find(s => s.upload_type === "manual");
+      
+      if (manualSession) {
+        setCurrentSessionId(manualSession.id);
+        setSessionStartTime(manualSession.upload_date);
+        return manualSession.id;
+      }
+
+      const res = await fetch("/upload-sessions/", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: user.id,
+          upload_type: "manual",
+          transaction_count: 0,
+        }),
+      });
+      const newSession = await res.json();
+      setCurrentSessionId(newSession.id);
+      setSessionStartTime(newSession.upload_date);
+      return newSession.id;
+    } catch (err) {
+      console.error("Error creating manual session:", err);
+      return null;
+    }
   };
 
-  // Update session when transaction is added
+  // Update session metadata
   const updateSession = async (sessionId, transactionDate, currentCount) => {
     try {
-      // Get current session data
       const sessionRes = await fetch(`/upload-sessions/user/${user.id}`);
       const sessions = await sessionRes.json();
       const session = sessions.find(s => s.id === sessionId);
-      
-      if (!session) {
-        console.error("Session not found");
-        return;
-      }
+      if (!session) return;
 
       const newCount = currentCount + 1;
-      
-      // Update max date (most recent)
       const currentMax = session.max_transaction_date;
       const maxDate = !currentMax || new Date(transactionDate) > new Date(currentMax)
         ? transactionDate
         : currentMax;
       
-      // Update min date (earliest)
       const currentMin = session.min_transaction_date;
       const minDate = !currentMin || new Date(transactionDate) < new Date(currentMin)
         ? transactionDate
@@ -151,7 +222,6 @@ function AddTransaction({ user, transactions, fetchTransactions }) {
         }),
       });
       
-      // Refresh upload history
       await fetchUploadHistory();
     } catch (err) {
       console.error("Error updating session:", err);
@@ -165,7 +235,6 @@ function AddTransaction({ user, transactions, fetchTransactions }) {
       return;
     }
 
-    // Ensure we have a manual session
     const sessionId = await ensureManualSession();
     if (!sessionId) {
       alert("Error creating upload session");
@@ -173,13 +242,16 @@ function AddTransaction({ user, transactions, fetchTransactions }) {
     }
 
     try {
+      // Format store name before sending
+      const formattedStore = formatStore(store);
+      
       const res = await fetch("/transactions/", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           type,
           category,
-          store,
+          store: formattedStore,
           amount: parseFloat(amount),
           description,
           tag: tag || null,
@@ -193,19 +265,15 @@ function AddTransaction({ user, transactions, fetchTransactions }) {
         const error = await res.json();
         throw new Error(error.detail || "Error adding transaction");
       }
-      const newTransaction = await res.json();
+      await res.json();
       alert("Transaction added!");
       
-      // Get current count from the session
       const sessionRes = await fetch(`/upload-sessions/user/${user.id}`);
       const sessions = await sessionRes.json();
       const session = sessions.find(s => s.id === sessionId);
       const currentCount = session ? session.transaction_count : 0;
       
-      // Update the session
       await updateSession(sessionId, transactionDate, currentCount);
-      
-      // Refresh transactions
       fetchTransactions();
       
       // Clear form and reset date to today
@@ -214,6 +282,7 @@ function AddTransaction({ user, transactions, fetchTransactions }) {
       setDescription("");
       setStore("");
       setTag("");
+      setSuggestedTags([]);
       setTransactionDate(getTodayLocal());
     } catch (err) {
       console.error(err);
@@ -231,76 +300,69 @@ function AddTransaction({ user, transactions, fetchTransactions }) {
       const res = await fetch(`/upload-sessions/${sessionId}`, {
         method: "DELETE",
       });
+      if (!res.ok) throw new Error("Failed to delete session");
       
-      if (!res.ok) {
-        const error = await res.json();
-        throw new Error(error.detail || "Error deleting upload session");
-      }
-      
-      alert("Upload session deleted successfully!");
+      alert("Upload session deleted!");
       fetchUploadHistory();
       fetchTransactions();
       
-      // Reset current session if it was deleted
-      if (sessionId === currentSessionId) {
+      if (currentSessionId === sessionId) {
         setCurrentSessionId(null);
+        setSessionStartTime(null);
       }
     } catch (err) {
       console.error(err);
-      alert(`Error deleting upload session: ${err.message}`);
+      alert(`Error deleting session: ${err.message}`);
     }
   };
 
-  // Close CSV upload and refresh data
-  const handleCSVUploadClose = () => {
-    setShowCSVUpload(false);
-    fetchUploadHistory();
-    fetchTransactions();
-  };
+  // Get categories based on type
+  const availableCategories = type === "income" ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
 
+  // Styles
   const containerStyle = {
     display: "grid",
     gridTemplateColumns: "1fr 1fr",
-    gap: "30px",
+    gap: "20px",
     marginTop: "20px",
   };
 
   const cardStyle = {
     backgroundColor: "white",
-    padding: "30px",
-    borderRadius: "10px",
+    padding: "20px",
+    borderRadius: "8px",
     boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
   };
 
-  const inputRowStyle = {
-    display: "flex",
-    flexDirection: "column",
-    marginBottom: "15px",
-  };
+  const inputRowStyle = { marginBottom: "15px" };
 
   const labelStyle = {
-    fontWeight: "bold",
+    display: "block",
     marginBottom: "5px",
+    fontWeight: "bold",
+    fontSize: "14px",
     color: "#333",
   };
 
   const inputStyle = {
+    width: "100%",
     padding: "10px",
-    border: "1px solid #ddd",
-    borderRadius: "5px",
     fontSize: "14px",
+    borderRadius: "5px",
+    border: "1px solid #ddd",
+    boxSizing: "border-box",
   };
 
   const buttonStyle = {
     backgroundColor: "#4CAF50",
     color: "white",
     border: "none",
-    padding: "12px",
+    padding: "12px 24px",
     borderRadius: "5px",
-    fontSize: "16px",
-    fontWeight: "bold",
     cursor: "pointer",
-    marginTop: "10px",
+    fontWeight: "bold",
+    fontSize: "14px",
+    width: "100%",
   };
 
   const csvButtonStyle = {
@@ -309,43 +371,10 @@ function AddTransaction({ user, transactions, fetchTransactions }) {
     border: "none",
     padding: "10px 20px",
     borderRadius: "5px",
-    fontSize: "14px",
-    fontWeight: "bold",
     cursor: "pointer",
-    display: "flex",
-    alignItems: "center",
-    gap: "8px",
-  };
-
-  const historyTableStyle = {
-    width: "100%",
-    borderCollapse: "collapse",
-    marginTop: "15px",
-  };
-
-  const thStyle = {
-    backgroundColor: "#1a1a2e",
-    color: "white",
-    padding: "10px",
-    textAlign: "left",
-    fontSize: "13px",
-  };
-
-  const tdStyle = {
-    padding: "10px",
-    borderBottom: "1px solid #eee",
-    fontSize: "13px",
-  };
-
-  const badgeStyle = (type) => ({
-    display: "inline-block",
-    padding: "4px 10px",
-    borderRadius: "12px",
-    fontSize: "11px",
     fontWeight: "bold",
-    backgroundColor: type === "bulk" ? "#2196F3" : "#9E9E9E",
-    color: "white",
-  });
+    fontSize: "14px",
+  };
 
   const deleteButtonStyle = {
     backgroundColor: "#f44336",
@@ -363,6 +392,19 @@ function AddTransaction({ user, transactions, fetchTransactions }) {
     justifyContent: "space-between",
     alignItems: "center",
     marginBottom: "10px",
+  };
+
+  const tagButtonStyle = {
+    backgroundColor: "#e3f2fd",
+    color: "#1976d2",
+    border: "1px solid #1976d2",
+    padding: "5px 10px",
+    borderRadius: "15px",
+    cursor: "pointer",
+    fontSize: "12px",
+    marginRight: "5px",
+    marginBottom: "5px",
+    display: "inline-block",
   };
 
   return (
@@ -383,8 +425,15 @@ function AddTransaction({ user, transactions, fetchTransactions }) {
 
           {/* Type */}
           <div style={inputRowStyle}>
-            <label style={labelStyle}>Type *</label>
-            <select style={inputStyle} value={type} onChange={(e) => setType(e.target.value)}>
+            <label style={labelStyle}>Type</label>
+            <select 
+              style={inputStyle} 
+              value={type} 
+              onChange={(e) => {
+                setType(e.target.value);
+                setCategory(""); // Reset category when type changes
+              }}
+            >
               <option value="expense">Expense</option>
               <option value="income">Income</option>
             </select>
@@ -404,13 +453,18 @@ function AddTransaction({ user, transactions, fetchTransactions }) {
           {/* Category */}
           <div style={inputRowStyle}>
             <label style={labelStyle}>Category *</label>
-            <input
-              type="text"
+            <select
               style={inputStyle}
-              placeholder="e.g., Groceries, Salary"
               value={category}
               onChange={(e) => setCategory(e.target.value)}
-            />
+            >
+              <option value="">-- Select Category --</option>
+              {availableCategories.map((cat) => (
+                <option key={cat} value={cat}>
+                  {cat}
+                </option>
+              ))}
+            </select>
           </div>
 
           {/* Store */}
@@ -419,10 +473,14 @@ function AddTransaction({ user, transactions, fetchTransactions }) {
             <input
               type="text"
               style={inputStyle}
-              placeholder="e.g., Target, ABC Company"
+              placeholder="e.g., Target, Chipotle"
               value={store}
               onChange={(e) => setStore(e.target.value)}
+              onBlur={handleStoreBlur}
             />
+            <div style={{ fontSize: "11px", color: "#666", marginTop: "3px" }}>
+              Store name will be formatted to Title Case
+            </div>
           </div>
 
           {/* Amount */}
@@ -444,18 +502,35 @@ function AddTransaction({ user, transactions, fetchTransactions }) {
             <input
               type="text"
               style={inputStyle}
-              placeholder="e.g., vacation, holiday-gifts"
+              placeholder="e.g., vacation, weekly"
               value={tag}
               onChange={(e) => setTag(e.target.value)}
             />
+            {suggestedTags.length > 0 && (
+              <div style={{ marginTop: "8px" }}>
+                <div style={{ fontSize: "11px", color: "#666", marginBottom: "5px" }}>
+                  Suggested tags:
+                </div>
+                {suggestedTags.map((suggestedTag) => (
+                  <button
+                    key={suggestedTag}
+                    style={tagButtonStyle}
+                    onClick={() => setTag(suggestedTag)}
+                  >
+                    {suggestedTag}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Description */}
           <div style={inputRowStyle}>
             <label style={labelStyle}>Description (Optional)</label>
-            <textarea
-              style={{ ...inputStyle, minHeight: "60px", resize: "vertical" }}
-              placeholder="Additional details..."
+            <input
+              type="text"
+              style={inputStyle}
+              placeholder="Additional notes"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
             />
@@ -471,65 +546,57 @@ function AddTransaction({ user, transactions, fetchTransactions }) {
           <h3 style={{ marginTop: 0, marginBottom: "20px", color: "#333" }}>
             Upload History
           </h3>
-          <p style={{ color: "#666", fontSize: "14px", marginBottom: "15px" }}>
-            Track your transaction uploads - both bulk CSV imports and manual entries.
-          </p>
-
+          {currentSessionId && sessionStartTime && (
+            <div style={{
+              backgroundColor: "#e8f5e9",
+              padding: "10px",
+              borderRadius: "5px",
+              marginBottom: "15px",
+              fontSize: "13px",
+              color: "#2e7d32",
+            }}>
+              <strong>Active Session:</strong> Started {formatTimestampWithTimezone(sessionStartTime)}
+            </div>
+          )}
           {uploadHistory.length === 0 ? (
-            <p style={{ textAlign: "center", color: "#999", padding: "40px 20px" }}>
-              No upload history yet. Start adding transactions or import a CSV!
-            </p>
+            <p style={{ color: "#999", textAlign: "center" }}>No upload history yet</p>
           ) : (
-            <div style={{ overflowX: "auto" }}>
-              <table style={historyTableStyle}>
-                <thead>
-                  <tr>
-                    <th style={thStyle}>Upload Date</th>
-                    <th style={thStyle}>Type</th>
-                    <th style={thStyle}>Count</th>
-                    <th style={thStyle}>Transaction Date Range</th>
-                    <th style={thStyle}>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {uploadHistory.map((session) => (
-                    <tr key={session.id}>
-                      <td style={tdStyle}>
-                        {formatTimestampWithTimezone(session.upload_date)}
-                      </td>
-                      <td style={tdStyle}>
-                        <span style={badgeStyle(session.upload_type)}>
-                          {session.upload_type.toUpperCase()}
-                        </span>
-                      </td>
-                      <td style={tdStyle}>{session.transaction_count}</td>
-                      <td style={tdStyle}>
-                        {session.min_transaction_date && session.max_transaction_date ? (
-                          session.min_transaction_date === session.max_transaction_date ? (
-                            // Single date
-                            formatDateSafe(session.min_transaction_date)
-                          ) : (
-                            // Date range
-                            `${formatDateSafe(session.min_transaction_date)} - ${formatDateSafe(session.max_transaction_date)}`
-                          )
-                        ) : session.max_transaction_date ? (
-                          formatDateSafe(session.max_transaction_date)
-                        ) : (
-                          "-"
+            <div style={{ maxHeight: "400px", overflowY: "auto" }}>
+              {uploadHistory.map((session) => (
+                <div
+                  key={session.id}
+                  style={{
+                    backgroundColor: "#f5f5f5",
+                    padding: "12px",
+                    borderRadius: "5px",
+                    marginBottom: "10px",
+                    fontSize: "13px",
+                  }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start" }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: "bold", marginBottom: "5px" }}>
+                        {session.upload_type === "manual" ? "✍️ Manual Entry" : "📤 CSV Upload"}
+                      </div>
+                      <div style={{ color: "#666", fontSize: "12px" }}>
+                        <div>Uploaded: {formatTimestampWithTimezone(session.upload_date)}</div>
+                        <div>Transactions: {session.transaction_count}</div>
+                        {session.min_transaction_date && session.max_transaction_date && (
+                          <div>
+                            Date Range: {formatDateSafe(session.min_transaction_date)} - {formatDateSafe(session.max_transaction_date)}
+                          </div>
                         )}
-                      </td>
-                      <td style={tdStyle}>
-                        <button
-                          onClick={() => deleteUploadSession(session.id)}
-                          style={deleteButtonStyle}
-                        >
-                          Delete
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => deleteUploadSession(session.id)}
+                      style={deleteButtonStyle}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              ))}
             </div>
           )}
         </div>
@@ -539,8 +606,11 @@ function AddTransaction({ user, transactions, fetchTransactions }) {
       {showCSVUpload && (
         <CSVUpload
           user={user}
-          fetchTransactions={fetchTransactions}
-          onClose={handleCSVUploadClose}
+          onClose={() => setShowCSVUpload(false)}
+          onUploadComplete={() => {
+            fetchTransactions();
+            fetchUploadHistory();
+          }}
         />
       )}
     </div>

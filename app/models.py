@@ -57,6 +57,7 @@ class AccountDefinition(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False)  # e.g., "Chase Checking", "401k"
     category = Column(String, nullable=False)  # "liquid", "investments", "debt"
+    is_active = Column(Boolean, default=True, nullable=False)  # True = active, False = closed
     user_id = Column(Integer, ForeignKey("users.id"))
     created_at = Column(DateTime, default=datetime.utcnow)
 

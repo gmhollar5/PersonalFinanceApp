@@ -461,17 +461,65 @@ def create_account_definition(account_def: schemas.AccountDefinitionCreate, db: 
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 @app.get("/account-definitions/user/{user_id}", response_model=List[schemas.AccountDefinitionOut])
-def get_user_account_definitions(user_id: int, db: Session = Depends(get_db)):
-    """Get all account definitions for a user"""
+def get_user_account_definitions(user_id: int, include_closed: bool = False, db: Session = Depends(get_db)):
+    """Get all account definitions for a user
+    
+    Args:
+        user_id: The user's ID
+        include_closed: If True, includes closed accounts. Default is False (active only)
+    """
     try:
-        account_defs = db.query(models.AccountDefinition).filter(
+        query = db.query(models.AccountDefinition).filter(
             models.AccountDefinition.user_id == user_id
-        ).order_by(models.AccountDefinition.category, models.AccountDefinition.name).all()
+        )
+        
+        # Filter by active status unless include_closed is True
+        if not include_closed:
+            query = query.filter(models.AccountDefinition.is_active == True)
+        
+        account_defs = query.order_by(
+            models.AccountDefinition.category, 
+            models.AccountDefinition.name
+        ).all()
         
         return account_defs
         
     except Exception as e:
         print(f"❌ Error fetching account definitions: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+@app.patch("/account-definitions/{account_def_id}", response_model=schemas.AccountDefinitionOut)
+def update_account_definition(
+    account_def_id: int, 
+    account_update: schemas.AccountDefinitionUpdate, 
+    db: Session = Depends(get_db)
+):
+    """Update an account definition (e.g., close/reactivate account)"""
+    try:
+        account_def = db.query(models.AccountDefinition).filter(
+            models.AccountDefinition.id == account_def_id
+        ).first()
+        
+        if not account_def:
+            raise HTTPException(status_code=404, detail="Account definition not found")
+        
+        # Update fields that are provided
+        update_data = account_update.model_dump(exclude_unset=True)
+        for key, value in update_data.items():
+            setattr(account_def, key, value)
+        
+        db.commit()
+        db.refresh(account_def)
+        
+        status = "closed" if not account_def.is_active else "reactivated"
+        print(f"✅ Account definition {status}: {account_def.name}")
+        return account_def
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        print(f"❌ Error updating account definition: {e}")
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 @app.delete("/account-definitions/{account_def_id}")

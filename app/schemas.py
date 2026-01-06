@@ -1,12 +1,12 @@
-from pydantic import BaseModel, field_validator
-from typing import Optional, List
+from pydantic import BaseModel, EmailStr, field_validator
 from datetime import datetime, date
+from typing import List, Optional
 
-# --- Users ---
+# --- User Schemas ---
 class UserCreate(BaseModel):
     first_name: str
     last_name: str
-    email: str
+    email: EmailStr
     password: str
     
     @field_validator('password')
@@ -16,6 +16,16 @@ class UserCreate(BaseModel):
             raise ValueError('Password must be at least 6 characters')
         return v
 
+class LoginCredentials(BaseModel):
+    """Schema for user login"""
+    email: str
+    password: str
+
+class UserLogin(BaseModel):
+    """Alternative login schema (if needed)"""
+    email: EmailStr
+    password: str
+
 class UserOut(BaseModel):
     id: int
     first_name: str
@@ -24,14 +34,10 @@ class UserOut(BaseModel):
 
     model_config = {"from_attributes": True}
 
-class LoginCredentials(BaseModel):
-    email: str
-    password: str
-
-# --- Upload Sessions ---
+# --- Upload Session Schemas ---
 class UploadSessionCreate(BaseModel):
     user_id: int
-    upload_type: str  # "manual" or "bulk"
+    upload_type: str
     transaction_count: int = 0
     min_transaction_date: Optional[date] = None
     max_transaction_date: Optional[date] = None
@@ -47,12 +53,12 @@ class UploadSessionOut(BaseModel):
     upload_type: str
     upload_date: datetime
     transaction_count: int
-    min_transaction_date: Optional[date] = None
-    max_transaction_date: Optional[date] = None
+    min_transaction_date: Optional[date]
+    max_transaction_date: Optional[date]
 
     model_config = {"from_attributes": True}
 
-# --- Transactions ---
+# --- Transaction Schemas ---
 class TransactionCreate(BaseModel):
     type: str
     category: str
@@ -69,27 +75,48 @@ class TransactionOut(BaseModel):
     id: int
     type: str
     category: str
+    store: Optional[str]
+    amount: float
+    description: Optional[str]
+    tag: Optional[str]
+    transaction_date: date
+    created_at: datetime
+    is_bulk_upload: bool
+    upload_session_id: Optional[int]
+    user_id: int
+
+    model_config = {"from_attributes": True}
+
+class TransactionBulkItem(BaseModel):
+    type: str
+    category: str
     store: Optional[str] = None
     amount: float
     description: Optional[str] = None
     tag: Optional[str] = None
-    transaction_date: date
-    created_at: datetime
-    is_bulk_upload: bool
+    transaction_date: str
+    is_bulk_upload: bool = True
     upload_session_id: Optional[int] = None
 
-    model_config = {"from_attributes": True}
+class TransactionBulkCreate(BaseModel):
+    user_id: int
+    transactions: List[TransactionBulkItem]
 
 # --- Account Definitions ---
 class AccountDefinitionCreate(BaseModel):
     name: str
-    category: str  # "liquid", "investments", "debt"
+    category: str
     user_id: int
+
+class AccountDefinitionUpdate(BaseModel):
+    """Schema for updating account definition (e.g., closing account)"""
+    is_active: Optional[bool] = None
 
 class AccountDefinitionOut(BaseModel):
     id: int
     name: str
     category: str
+    is_active: bool
     user_id: int
     created_at: datetime
 
