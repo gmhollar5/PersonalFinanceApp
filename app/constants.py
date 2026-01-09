@@ -16,11 +16,76 @@ Each section has clear instructions on how to add your own rules!
 =============================================================================
 """
 
+CATEGORY_MAPPING = {
+    # Income variations
+    "other income": "Other Income",
+    "side hustle": "Other Income",
+    "tax refund": "Other Income",
+    "paycheck": "Salary",
+    "wage": "Salary",
+    "payment/credit": "Other Income",  # Credit card payments treated as income
+    
+    # Expense variations
+    "dining out": "Dining",  # ← FIX for your issue!
+    "restaurants": "Dining",
+    "food": "Groceries",
+    "grocery": "Groceries",
+    "gas & auto": "Gas & Auto",
+    "automotive": "Gas & Auto",
+    "fuel": "Gas & Auto",
+    "online shopping": "Shopping",
+    "retail": "Shopping",
+    "streaming": "Subscriptions",
+    "internet": "Subscriptions",
+    "cable": "Subscriptions",
+    "utility": "Utilities",
+    "utilities": "Utilities",
+    "electric": "Utilities",
+    "water": "Utilities",
+    "mortgage": "Rent",
+    "lease": "Rent",
+    "health": "Health & Fitness",
+    "fitness": "Health & Fitness",
+    "gym": "Health & Fitness",
+    "medical": "Health & Fitness",
+    "movies": "Entertainment",
+    "concert": "Entertainment",
+    "flight": "Travel",
+    "hotel": "Travel",
+    "school": "Education",
+    "tuition": "Education",
+    "credit card": "Credit Card Payment",
+    "cc payment": "Credit Card Payment",
+    "loan": "Loan Payment",
+    "student loan": "Student Loan",
+    "car": "Car Payment",
+    "auto loan": "Car Payment",
+    "mobile": "Phone",
+    "cell phone": "Phone",
+    "home": "Household",
+    "furniture": "Household",
+    "gift": "Gifts",
+    "present": "Gifts",
+    "other expense": "Other",
+    "miscellaneous": "Other",
+    "misc": "Other",
+    "fun money": "Entertainment",
+    "golf": "Entertainment",
+    "grad school": "Education",
+    "home & hygiene": "Household",
+    "netflix": "Subscriptions",
+    "spotify": "Subscriptions",
+    "phone storage": "Subscriptions",
+    "other expense": "Other Expense",
+    "other income": "Other Income"
+}
+
+
 # =============================================================================
 # EXPENSE CATEGORIES (in Title Case for consistency)
 # =============================================================================
 EXPENSE_CATEGORIES = [
-    "Dining Out",
+    "Dining",
     "Entertainment",    # Includes bars, alcohol, golf, hobbies, etc
     "Gas & Auto",
     "Gifts",
@@ -253,21 +318,6 @@ def normalize_store(store: str) -> str:
 # =============================================================================
 # CATEGORY MAPPING (for normalizing old/variant category names)
 # =============================================================================
-CATEGORY_MAPPING = {
-    # Normalize old names to new names (case-insensitive)
-    "fun money": "Entertainment",
-    "golf": "Entertainment",
-    "grad school": "Education",
-    "home & hygiene": "Household",
-    "netflix": "Subscriptions",
-    "spotify": "Subscriptions",
-    "phone storage": "Subscriptions",
-    "other expense": "Other Expense",
-    "other income": "Other Income",
-    
-    # Add your own mappings here:
-    # "old_name": "New Category Name",
-}
 
 
 # =============================================================================
@@ -293,19 +343,19 @@ def categorize_by_store(store_name: str) -> str:
     store_lower = store_name.lower()
     
     # Groceries
-    if any(s in store_lower for s in ['target', 'walmart', 'costco', 'whole foods', 'trader joe', 'kroger', 'safeway', 'aldi', 'publix']):
+    if any(s in store_lower for s in ['hyvee', 'hy-vee', 'target', 'walmart', 'costco', 'whole foods', 'trader joe', 'kroger', 'safeway', 'aldi', 'publix', 'lunds', 'byerlys']):
         return "Groceries"
     
-    # Dining Out - Fast Food
-    if any(s in store_lower for s in ['mcdonald', 'burger king', 'taco bell', 'chipotle', 'subway', 'kfc', 'wendys', 'chick-fil-a', 'popeyes']):
-        return "Dining Out"
+    # Dining - Fast Food
+    if any(s in store_lower for s in ['jimmy john', 'scoreboard', 'jersey mike', 'culvers', "culver's", 'cuisine', 'mcdonald', 'burger king', 'taco bell', 'chipotle', 'subway', 'kfc', 'wendys', 'chick-fil-a', 'popeyes', 'canes', "cane's"]):
+        return "Dining"
     
-    # Dining Out - Restaurants
-    if any(s in store_lower for s in ['starbucks', 'poke', 'restaurant', 'cafe', 'coffee', 'pizza', 'panera', 'spitz', 'bistro']):
-        return "Dining Out"
+    # Dining - Restaurants
+    if any(s in store_lower for s in ['piada', 'kitchen', 'mexican', 'burger', 'pub', 'tavern', 'taqueria', 'starbucks', 'poke', 'restaurant', 'cafe', 'coffee', 'pizza', 'panera', 'spitz', 'bistro', 'taphouse', 'tap house', 'tap room', 'taco', 'tacos']):
+        return "Dining"
     
     # Gas & Auto
-    if any(s in store_lower for s in ['shell', 'chevron', 'exxon', 'mobil', 'bp', 'gas', 'fuel', 'costco gas']):
+    if any(s in store_lower for s in ['kwik trip', 'marathon', 'speedway', 'holliday', 'holiday', 'shell', 'chevron', 'exxon', 'mobil', 'bp', 'gas', 'fuel', 'costco gas', 'tires']):
         return "Gas & Auto"
     
     # Subscriptions
@@ -313,21 +363,25 @@ def categorize_by_store(store_name: str) -> str:
         return "Subscriptions"
     
     # Online Shopping
-    if any(s in store_lower for s in ['amazon', 'ebay', 'etsy', 'patina', 'sierra', 'kohls', 'hollister', 'american eagle', 'lulu lemon']):
+    if any(s in store_lower for s in ['records', 'antiques', 'amazon', 'ebay', 'etsy', 'patina', 'sierra', 'kohls', 'hollister', 'american eagle', 'lulu lemon']):
         return "Shopping"
     
     # Health & Fitness
-    if any(s in store_lower for s in ['cvs', 'walgreens', 'pharmacy', 'gym', 'fitness']):
+    if any(s in store_lower for s in ['cvs', 'walgreens', 'pharmacy', 'gym', 'fitness', 'planet', 'planet fit', 'planet fitness']):
         return "Health & Fitness"
     
     # Phone/Internet
-    if any(s in store_lower for s in ['verizon', 'at&t', 't-mobile', 'sprint', 'xfinity', 'comcast']):
+    if any(s in store_lower for s in ['xcel', 'energy', 'centerpoint', 'center point', 'quantum fiber', 'verizon', 'at&t', 't-mobile', 'sprint', 'xfinity', 'comcast']):
         # Could be Phone or Utilities depending on service
-        return "Phone"  # Default to Phone, user can adjust
+        return "Utilities"  # Default to Phone, user can adjust
     
     # Transportation
     if any(s in store_lower for s in ['uber', 'lyft', "plane", "delta", "airline", "sun country"]):
         return "Travel"
+    
+    # Entertainment
+    if any(s in store_lower for s in ['liquor', 'bar', 'golf', 'course', 'club', 'cider', 'cowboy jacks', 'wine', 'total wine', 'beer', 'alcohol', 'winery', 'cidery']):
+        return "Entertainment"
     
     # Add your own store categorization rules here:
     # if 'your_store' in store_lower:
@@ -433,7 +487,7 @@ def get_automatic_tags(store: str, category: str, amount: float, description: st
         tags.append("vacation")
     
     # Weekly groceries tag
-    if category == "Groceries" | category == "Dining Out":
+    if category == "Groceries" | category == "Dining":
         tags.append("food")
     
     # Add your own automatic tagging rules here:

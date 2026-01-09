@@ -7,8 +7,15 @@ from datetime import date, datetime, timedelta
 from . import models, schemas
 from .database import Base, engine, get_db
 from .auth import hash_password, verify_password
-from .csv_parser import parse_csv
-from .schemas_csv import ParsedTransaction, CSVUploadResponse, BulkTransactionCreate
+from .csv_parser import parse_csv, get_csv_preview
+from .schemas_csv import (
+    ParsedTransaction, 
+    CSVUploadResponse, 
+    BulkTransactionCreate,
+    CSVPreviewResponse,
+    CSVParseWithMappingRequest
+)
+from .constants import INCOME_CATEGORIES, EXPENSE_CATEGORIES, ALL_CATEGORIES
 
 # Create tables if not exist
 Base.metadata.create_all(bind=engine)
@@ -23,6 +30,19 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ------------------- Categories -------------------
+@app.get("/categories")
+def get_categories():
+    """
+    Get all valid transaction categories.
+    Returns expense and income categories from constants.py (single source of truth).
+    """
+    return {
+        "income": INCOME_CATEGORIES,
+        "expense": EXPENSE_CATEGORIES,
+        "all": ALL_CATEGORIES
+    }
 
 # ------------------- Auth/Users -------------------
 @app.post("/signup", response_model=schemas.UserOut)
@@ -72,18 +92,7 @@ def login(credentials: schemas.LoginCredentials, db: Session = Depends(get_db)):
         raise
     except Exception as e:
         print(f"❌ Error during login: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
-
-@app.post("/users/", response_model=schemas.UserOut)
-def create_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
-    """Create a new user account (legacy endpoint)"""
-    return signup(user, db)
-
-@app.get("/users/", response_model=list[schemas.UserOut])
-def get_all_users(db: Session = Depends(get_db)):
-    """Get all users (DEBUG ONLY)"""
-    users = db.query(models.User).all()
-    return users
+        raise HTTPException(status_code=500, detail=f"Authentication error: {str(e)}")
 
 # ------------------- Upload Sessions -------------------
 @app.post("/upload-sessions/", response_model=schemas.UploadSessionOut)
@@ -94,12 +103,18 @@ def create_upload_session(session: schemas.UploadSessionCreate, db: Session = De
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
         
-        db_session = models.UploadSession(**session.model_dump())
+        db_session = models.UploadSession(
+            user_id=session.user_id,
+            upload_type=session.upload_type,
+            transaction_count=session.transaction_count,
+            min_transaction_date=session.min_transaction_date,
+            max_transaction_date=session.max_transaction_date
+        )
         db.add(db_session)
         db.commit()
         db.refresh(db_session)
         
-        print(f"✅ Upload session created: ID {db_session.id} ({db_session.upload_type})")
+        print(f"✅ Upload session created: ID {db_session.id}")
         return db_session
         
     except HTTPException:
@@ -109,7 +124,7 @@ def create_upload_session(session: schemas.UploadSessionCreate, db: Session = De
         print(f"❌ Error creating upload session: {e}")
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
-@app.get("/upload-sessions/user/{user_id}", response_model=list[schemas.UploadSessionOut])
+@app.get("/upload-sessions/user/{user_id}", response_model=List[schemas.UploadSessionOut])
 def get_user_upload_sessions(user_id: int, db: Session = Depends(get_db)):
     """Get all upload sessions for a user"""
     try:
@@ -124,7 +139,11 @@ def get_user_upload_sessions(user_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 @app.patch("/upload-sessions/{session_id}", response_model=schemas.UploadSessionOut)
-def update_upload_session(session_id: int, session_update: schemas.UploadSessionUpdate, db: Session = Depends(get_db)):
+def update_upload_session(
+    session_id: int,
+    session_update: schemas.UploadSessionUpdate,
+    db: Session = Depends(get_db)
+):
     """Update an upload session"""
     try:
         db_session = db.query(models.UploadSession).filter(
@@ -132,16 +151,18 @@ def update_upload_session(session_id: int, session_update: schemas.UploadSession
         ).first()
         
         if not db_session:
-            raise HTTPException(status_code=404, detail="Upload session not found")
+            raise HTTPException(status_code=404, detail="Session not found")
         
-        update_data = session_update.model_dump(exclude_unset=True)
-        for key, value in update_data.items():
-            setattr(db_session, key, value)
+        if session_update.transaction_count is not None:
+            db_session.transaction_count = session_update.transaction_count
+        if session_update.min_transaction_date is not None:
+            db_session.min_transaction_date = session_update.min_transaction_date
+        if session_update.max_transaction_date is not None:
+            db_session.max_transaction_date = session_update.max_transaction_date
         
         db.commit()
         db.refresh(db_session)
         
-        print(f"✅ Upload session updated: ID {db_session.id}")
         return db_session
         
     except HTTPException:
@@ -155,24 +176,31 @@ def update_upload_session(session_id: int, session_update: schemas.UploadSession
 def delete_upload_session(session_id: int, db: Session = Depends(get_db)):
     """Delete an upload session and all its transactions"""
     try:
-        db_session = db.query(models.UploadSession).filter(
+        session = db.query(models.UploadSession).filter(
             models.UploadSession.id == session_id
         ).first()
         
-        if not db_session:
-            raise HTTPException(status_code=404, detail="Upload session not found")
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
         
         # Delete all transactions in this session
-        db.query(models.Transaction).filter(
+        transactions = db.query(models.Transaction).filter(
             models.Transaction.upload_session_id == session_id
-        ).delete()
+        ).all()
+        
+        transaction_count = len(transactions)
+        for transaction in transactions:
+            db.delete(transaction)
         
         # Delete the session
-        db.delete(db_session)
+        db.delete(session)
         db.commit()
         
-        print(f"✅ Upload session deleted: ID {session_id}")
-        return {"success": True, "message": "Upload session deleted"}
+        print(f"✅ Upload session deleted: ID {session_id} ({transaction_count} transactions)")
+        return {
+            "success": True,
+            "message": f"Session and {transaction_count} transactions deleted"
+        }
         
     except HTTPException:
         raise
@@ -190,12 +218,23 @@ def create_transaction(transaction: schemas.TransactionCreate, db: Session = Dep
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
         
-        db_transaction = models.Transaction(**transaction.model_dump())
+        db_transaction = models.Transaction(
+            type=transaction.type,
+            category=transaction.category,
+            store=transaction.store,
+            amount=transaction.amount,
+            description=transaction.description,
+            tag=transaction.tag,
+            transaction_date=transaction.transaction_date,
+            is_bulk_upload=transaction.is_bulk_upload,
+            upload_session_id=transaction.upload_session_id,
+            user_id=transaction.user_id
+        )
         db.add(db_transaction)
         db.commit()
         db.refresh(db_transaction)
         
-        print(f"✅ Transaction created: ${db_transaction.amount} ({db_transaction.type}) on {db_transaction.transaction_date}")
+        print(f"✅ Transaction created: ID {db_transaction.id}")
         return db_transaction
         
     except HTTPException:
@@ -205,9 +244,9 @@ def create_transaction(transaction: schemas.TransactionCreate, db: Session = Dep
         print(f"❌ Error creating transaction: {e}")
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
-@app.get("/transactions/user/{user_id}", response_model=list[schemas.TransactionOut])
+@app.get("/transactions/user/{user_id}", response_model=List[schemas.TransactionOut])
 def get_user_transactions(user_id: int, db: Session = Depends(get_db)):
-    """Get all transactions for a specific user"""
+    """Get all transactions for a user"""
     try:
         transactions = db.query(models.Transaction).filter(
             models.Transaction.user_id == user_id
@@ -221,7 +260,7 @@ def get_user_transactions(user_id: int, db: Session = Depends(get_db)):
 
 @app.delete("/transactions/{transaction_id}")
 def delete_transaction(transaction_id: int, db: Session = Depends(get_db)):
-    """Delete a specific transaction and update its upload session"""
+    """Delete a transaction"""
     try:
         transaction = db.query(models.Transaction).filter(
             models.Transaction.id == transaction_id
@@ -272,6 +311,32 @@ def delete_transaction(transaction_id: int, db: Session = Depends(get_db)):
         print(f"❌ Error deleting transaction: {e}")
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
+# ------------------- CSV Upload & Parsing -------------------
+@app.post("/transactions/csv-preview", response_model=CSVPreviewResponse)
+async def preview_csv_file(file: UploadFile = File(...)):
+    """
+    Preview CSV file - returns column headers and sample rows.
+    Used for the column mapping interface.
+    """
+    try:
+        # Read file content
+        content = await file.read()
+        content_str = content.decode("utf-8")
+        
+        # Get preview
+        columns, sample_rows = get_csv_preview(content_str, max_rows=5)
+        
+        return CSVPreviewResponse(
+            success=True,
+            message=f"CSV preview - {len(columns)} columns found",
+            columns=columns,
+            sample_rows=sample_rows
+        )
+        
+    except Exception as e:
+        print(f"❌ Error previewing CSV: {e}")
+        raise HTTPException(status_code=500, detail=f"Error previewing CSV: {str(e)}")
+
 @app.post("/transactions/parse-csv", response_model=CSVUploadResponse)
 async def parse_csv_file(
     file: UploadFile = File(...),
@@ -315,6 +380,70 @@ async def parse_csv_file(
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         print(f"❌ Error parsing CSV: {e}")
+        raise HTTPException(status_code=500, detail=f"Error parsing CSV: {str(e)}")
+
+@app.post("/transactions/parse-csv-with-mapping", response_model=CSVUploadResponse)
+async def parse_csv_with_mapping(
+    file: UploadFile = File(...),
+    mapping_json: str = Form(...)
+):
+    """
+    Parse a CSV file with custom column mapping.
+    Used for generic CSV files that don't match SoFi or Capital One format.
+    """
+    try:
+        import json
+        
+        # Read file content
+        content = await file.read()
+        content_str = content.decode("utf-8")
+        
+        # Parse mapping from JSON string
+        mapping_data = json.loads(mapping_json)
+        
+        # Convert to dict for csv_parser
+        column_mapping = {
+            "date_column": mapping_data.get("date_column"),
+            "amount_column": mapping_data.get("amount_column"),
+            "debit_column": mapping_data.get("debit_column"),
+            "credit_column": mapping_data.get("credit_column"),
+            "store_column": mapping_data.get("store_column"),
+            "category_column": mapping_data.get("category_column"),
+            "description_column": mapping_data.get("description_column"),
+            "use_two_columns": mapping_data.get("use_two_columns", False)
+        }
+        
+        # Parse CSV with column mapping
+        detected_type, transactions = parse_csv(content_str, bank_type="generic", column_mapping=column_mapping)
+        
+        # Convert to response format
+        parsed_transactions = [
+            ParsedTransaction(
+                date=t["date"],
+                description=t["description"],
+                original_type=t["original_type"],
+                amount=t["amount"],
+                type=t["type"],
+                suggested_category=t.get("suggested_category"),
+                store=t.get("store")
+            )
+            for t in transactions
+        ]
+        
+        return CSVUploadResponse(
+            success=True,
+            message=f"Successfully parsed {len(transactions)} transactions with custom mapping",
+            bank_type=detected_type,
+            transaction_count=len(transactions),
+            transactions=parsed_transactions
+        )
+        
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except json.JSONDecodeError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid mapping JSON: {str(e)}")
+    except Exception as e:
+        print(f"❌ Error parsing CSV with mapping: {e}")
         raise HTTPException(status_code=500, detail=f"Error parsing CSV: {str(e)}")
 
 @app.post("/transactions/bulk-create")
@@ -377,7 +506,7 @@ async def bulk_create_transactions(
 
 @app.post("/transactions/bulk")
 def create_bulk_transactions_alt(data: BulkTransactionCreate, db: Session = Depends(get_db)):
-    """Create multiple transactions at once"""
+    """Create multiple transactions at once (alternative endpoint)"""
     try:
         user = db.query(models.User).filter(models.User.id == data.user_id).first()
         if not user:
@@ -441,7 +570,6 @@ def create_account_definition(account_def: schemas.AccountDefinitionCreate, db: 
             models.AccountDefinition.user_id == account_def.user_id,
             models.AccountDefinition.name == account_def.name
         ).first()
-        
         if existing:
             raise HTTPException(status_code=400, detail="Account with this name already exists")
         
@@ -461,65 +589,17 @@ def create_account_definition(account_def: schemas.AccountDefinitionCreate, db: 
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 @app.get("/account-definitions/user/{user_id}", response_model=List[schemas.AccountDefinitionOut])
-def get_user_account_definitions(user_id: int, include_closed: bool = False, db: Session = Depends(get_db)):
-    """Get all account definitions for a user
-    
-    Args:
-        user_id: The user's ID
-        include_closed: If True, includes closed accounts. Default is False (active only)
-    """
+def get_user_account_definitions(user_id: int, db: Session = Depends(get_db)):
+    """Get all account definitions for a user"""
     try:
-        query = db.query(models.AccountDefinition).filter(
+        account_defs = db.query(models.AccountDefinition).filter(
             models.AccountDefinition.user_id == user_id
-        )
-        
-        # Filter by active status unless include_closed is True
-        if not include_closed:
-            query = query.filter(models.AccountDefinition.is_active == True)
-        
-        account_defs = query.order_by(
-            models.AccountDefinition.category, 
-            models.AccountDefinition.name
-        ).all()
+        ).order_by(models.AccountDefinition.category, models.AccountDefinition.name).all()
         
         return account_defs
         
     except Exception as e:
         print(f"❌ Error fetching account definitions: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
-
-@app.patch("/account-definitions/{account_def_id}", response_model=schemas.AccountDefinitionOut)
-def update_account_definition(
-    account_def_id: int, 
-    account_update: schemas.AccountDefinitionUpdate, 
-    db: Session = Depends(get_db)
-):
-    """Update an account definition (e.g., close/reactivate account)"""
-    try:
-        account_def = db.query(models.AccountDefinition).filter(
-            models.AccountDefinition.id == account_def_id
-        ).first()
-        
-        if not account_def:
-            raise HTTPException(status_code=404, detail="Account definition not found")
-        
-        # Update fields that are provided
-        update_data = account_update.model_dump(exclude_unset=True)
-        for key, value in update_data.items():
-            setattr(account_def, key, value)
-        
-        db.commit()
-        db.refresh(account_def)
-        
-        status = "closed" if not account_def.is_active else "reactivated"
-        print(f"✅ Account definition {status}: {account_def.name}")
-        return account_def
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        db.rollback()
-        print(f"❌ Error updating account definition: {e}")
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 @app.delete("/account-definitions/{account_def_id}")
@@ -833,12 +913,12 @@ def delete_account_record(record_id: int, db: Session = Depends(get_db)):
         print(f"❌ Error deleting account record: {e}")
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
-# Health check
+# ------------------- Health Check -------------------
 @app.get("/")
-def read_root():
+def root():
     """Health check endpoint"""
     return {
         "status": "ok",
         "message": "Personal Finance API is running",
-        "version": "3.1"  # Updated for upload sessions support
+        "version": "3.1"
     }
