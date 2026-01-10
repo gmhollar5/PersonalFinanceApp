@@ -389,7 +389,29 @@ function ViewTransactions({ transactions, fetchTransactions }) {
 
   return (
     <div style={containerStyle}>
-      <h2 style={{ marginTop: 0 }}>View Transactions</h2>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
+        <h2 style={{ margin: 0 }}>View Transactions</h2>
+        <button
+          onClick={() => {
+            fetchTransactions();
+            alert("Transactions refreshed!");
+          }}
+          style={{
+            padding: "10px 20px",
+            backgroundColor: "#4CAF50",
+            color: "white",
+            border: "none",
+            borderRadius: "5px",
+            cursor: "pointer",
+            fontSize: "14px",
+            fontWeight: "bold",
+            boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+          }}
+        >
+          🔄 Refresh Transactions
+        </button>
+      </div>
+
 
       {/* Summary */}
       <div style={cardStyle}>

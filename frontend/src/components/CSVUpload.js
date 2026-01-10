@@ -430,9 +430,24 @@ function CSVUpload({ user, fetchTransactions, onClose }) {
         }),
       });
 
+
+
       setImportStats(data);
       setStep("complete");
-      fetchTransactions();
+
+      // Delay fetchTransactions to ensure database transaction completes
+      setTimeout(async () => {
+        try {
+          console.log("🔄 Refreshing transactions after bulk import...");
+          await fetchTransactions();
+          console.log("✅ Transactions refreshed successfully");
+        } catch (err) {
+          console.error("❌ Error refreshing transactions:", err);
+          // Don't show error to user since import was successful
+          // The transactions will appear when they navigate away and back
+        }
+      }, 500);
+
     } catch (err) {
       console.error(err);
       setError(err.message);

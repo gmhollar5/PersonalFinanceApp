@@ -176,6 +176,10 @@ STORE_PATTERNS = {
     "chick fil a": "Chick-fil-A",
     "kfc": "KFC",
     "popeyes": "Popeyes",
+    "jimmy john": "Jimmy Johns",
+    "piada": "Piada",
+    "airbnb": "AirBnB",
+    "cub foods": "Cub Foods",
     
     # Dining - Fast Casual & Restaurants
     "starbucks": "Starbucks",
@@ -343,19 +347,19 @@ def categorize_by_store(store_name: str) -> str:
     store_lower = store_name.lower()
     
     # Groceries
-    if any(s in store_lower for s in ['hyvee', 'hy-vee', 'target', 'walmart', 'costco', 'whole foods', 'trader joe', 'kroger', 'safeway', 'aldi', 'publix', 'lunds', 'byerlys']):
+    if any(s in store_lower for s in ['cub', 'hyvee', 'hy-vee', 'target', 'walmart', 'costco', 'whole foods', 'trader joe', 'kroger', 'safeway', 'aldi', 'publix', 'lunds', 'byerlys']):
         return "Groceries"
     
     # Dining - Fast Food
-    if any(s in store_lower for s in ['jimmy john', 'scoreboard', 'jersey mike', 'culvers', "culver's", 'cuisine', 'mcdonald', 'burger king', 'taco bell', 'chipotle', 'subway', 'kfc', 'wendys', 'chick-fil-a', 'popeyes', 'canes', "cane's"]):
+    if any(s in store_lower for s in ['fuzzy', 'jimmy john', 'scoreboard', 'jersey mike', 'culvers', "culver's", 'cuisine', 'mcdonald', 'burger king', 'taco bell', 'chipotle', 'subway', 'kfc', 'wendys', 'chick-fil-a', 'popeyes', 'canes', "cane's"]):
         return "Dining"
     
     # Dining - Restaurants
-    if any(s in store_lower for s in ['piada', 'kitchen', 'mexican', 'burger', 'pub', 'tavern', 'taqueria', 'starbucks', 'poke', 'restaurant', 'cafe', 'coffee', 'pizza', 'panera', 'spitz', 'bistro', 'taphouse', 'tap house', 'tap room', 'taco', 'tacos']):
+    if any(s in store_lower for s in ['dugarels', 'sweetgreen', 'piada', 'kitchen', 'mexican', 'burger', 'pub', 'tavern', 'taqueria', 'starbucks', 'poke', 'restaurant', 'cafe', 'coffee', 'pizza', 'panera', 'spitz', 'bistro', 'taphouse', 'tap house', 'tap room', 'taco', 'tacos']):
         return "Dining"
     
     # Gas & Auto
-    if any(s in store_lower for s in ['kwik trip', 'marathon', 'speedway', 'holliday', 'holiday', 'shell', 'chevron', 'exxon', 'mobil', 'bp', 'gas', 'fuel', 'costco gas', 'tires']):
+    if any(s in store_lower for s in ['parkade', 'auto', 'napa', 'valvoline', 'kwik trip', 'marathon', 'speedway', 'holliday', 'holiday', 'shell', 'chevron', 'exxon', 'mobil', 'bp', 'gas', 'fuel', 'costco gas', 'tires', 'oil']):
         return "Gas & Auto"
     
     # Subscriptions
@@ -363,33 +367,54 @@ def categorize_by_store(store_name: str) -> str:
         return "Subscriptions"
     
     # Online Shopping
-    if any(s in store_lower for s in ['records', 'antiques', 'amazon', 'ebay', 'etsy', 'patina', 'sierra', 'kohls', 'hollister', 'american eagle', 'lulu lemon']):
+    if any(s in store_lower for s in ['kohl', 'records', 'antiques', 'amazon', 'ebay', 'etsy', 'patina', 'sierra', 'kohls', 'hollister', 'american eagle', 'lulu lemon']):
         return "Shopping"
     
     # Health & Fitness
-    if any(s in store_lower for s in ['cvs', 'walgreens', 'pharmacy', 'gym', 'fitness', 'planet', 'planet fit', 'planet fitness']):
+    if any(s in store_lower for s in ['jellos', 'barbershop', 'cvs', 'walgreens', 'pharmacy', 'gym', 'fitness', 'planet', 'planet fit', 'planet fitness']):
         return "Health & Fitness"
     
     # Phone/Internet
-    if any(s in store_lower for s in ['xcel', 'energy', 'centerpoint', 'center point', 'quantum fiber', 'verizon', 'at&t', 't-mobile', 'sprint', 'xfinity', 'comcast']):
+    if any(s in store_lower for s in ['conservice', 'xcel', 'energy', 'centerpoint', 'center point', 'quantum fiber', 'verizon', 'at&t', 't-mobile', 'sprint', 'xfinity', 'comcast']):
         # Could be Phone or Utilities depending on service
         return "Utilities"  # Default to Phone, user can adjust
     
     # Transportation
-    if any(s in store_lower for s in ['uber', 'lyft', "plane", "delta", "airline", "sun country"]):
+    if any(s in store_lower for s in ['navigo', 'paris', 'lyon', 'france', 'uber', 'lyft', "plane", "delta", "airline", "sun country"]):
         return "Travel"
     
     # Entertainment
-    if any(s in store_lower for s in ['liquor', 'bar', 'golf', 'course', 'club', 'cider', 'cowboy jacks', 'wine', 'total wine', 'beer', 'alcohol', 'winery', 'cidery']):
+    if any(s in store_lower for s in ['brewing', 'brewery', 'rabbit hole', 'liquor', 'bar', 'golf', 'course', 'club', 'cider', 'cowboy jacks', 'wine', 'total wine', 'beer', 'alcohol', 'winery', 'cidery']):
         return "Entertainment"
 
     # interest
     if any(s in store_lower for s in ['interest']):
         return "Interest"
     
+    # car payment
+    if any(s in store_lower for s in ['auto loan', 'car payment', 'vehicle loan', "truck loan" , 'southpoint']):
+        return "Car Payment"
+    
+    # student loan
+    if any(s in store_lower for s in ['student loan', 'navient', 'great lakes', 'fedloan', 'dept educ']):
+        return "Student Loan"
+    
+    # refund
+    if any(s in store_lower for s in ['refund']):
+        return "Refund"
+    
     # salary
-    if any(s in store_lower for s in ['northern', 'nte', 'best buy', 'bby', 'bestbuy', 'post consumer brand', 'pcb']):
+    if any(s in store_lower for s in ['mom brands pay','direct deposit', 'payroll', 'salary', 'northern', 'nte', 'best buy', 'bby', 'bestbuy', 'post consumer brand', 'pcb']):
         return "Salary"
+    
+    # Rent
+    if any(word in store_lower for word in ['rent', 'apartment', 'housing', "alcott", "whitecap", "nolo"]):
+        return "Rent"
+    
+    # Education
+    if any(word in store_lower for word in ['univ. of iowa', 'und', 'ndus', 'ndsu']):
+        return "Education"
+    
     
     # Add your own store categorization rules here:
     # if 'your_store' in store_lower:
@@ -425,7 +450,7 @@ def categorize_by_keywords(description: str, transaction_type: str = "") -> str:
         return "Utilities"
     
     # Student Loan
-    if any(word in desc_lower for word in ['student loan', 'navient', 'great lakes', 'fedloan']):
+    if any(word in desc_lower for word in ['student loan', 'navient', 'great lakes', 'fedloan', 'dept educ']):
         return "Student Loan"
     
     # Car Payment
