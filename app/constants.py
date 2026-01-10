@@ -382,6 +382,14 @@ def categorize_by_store(store_name: str) -> str:
     # Entertainment
     if any(s in store_lower for s in ['liquor', 'bar', 'golf', 'course', 'club', 'cider', 'cowboy jacks', 'wine', 'total wine', 'beer', 'alcohol', 'winery', 'cidery']):
         return "Entertainment"
+
+    # interest
+    if any(s in store_lower for s in ['interest']):
+        return "Interest"
+    
+    # salary
+    if any(s in store_lower for s in ['northern', 'nte', 'best buy', 'bby', 'bestbuy', 'post consumer brand', 'pcb']):
+        return "Salary"
     
     # Add your own store categorization rules here:
     # if 'your_store' in store_lower:
