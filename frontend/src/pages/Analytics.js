@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from "react";
 
 // Simple Line Chart Component with multi-year support
-function LineChart({ data, width = 900, height = 350, colors = ["#4CAF50"], labels = [] }) {
+function LineChart({ data, width = 900, height = 350, colors = ["#4CAF50"], labels = [], formatValue = (v) => `$${v.toFixed(0)}` }) {
   if (data.length === 0) return <p style={{ color: "#999" }}>No data available</p>;
 
   const padding = 60;
@@ -46,7 +46,7 @@ function LineChart({ data, width = 900, height = 350, colors = ["#4CAF50"], labe
                 strokeWidth="1"
               />
               <text x={padding - 10} y={y + 5} fontSize="12" fill="#999" textAnchor="end">
-                ${((minValue + valueRange * ratio) / 1).toFixed(0)}
+                {formatValue((minValue + valueRange * ratio))}
               </text>
             </g>
           );
@@ -1110,6 +1110,7 @@ function Analytics({ transactions, user }) {
               labels={[`${trendsData.previousYear}`, `${trendsData.currentYear}`]}
               width={900}
               height={350}
+              formatValue={(v) => `$${Math.round(v).toLocaleString()}`}
             />
           </div>
 
@@ -1124,6 +1125,7 @@ function Analytics({ transactions, user }) {
               labels={[`${trendsData.previousYear}`, `${trendsData.currentYear}`]}
               width={900}
               height={350}
+              formatValue={(v) => `$${Math.round(v).toLocaleString()}`}
             />
           </div>
 
@@ -1138,6 +1140,7 @@ function Analytics({ transactions, user }) {
               labels={[`${trendsData.previousYear}`, `${trendsData.currentYear}`]}
               width={900}
               height={350}
+              formatValue={(v) => `${v.toFixed(1)}%`}
             />
           </div>
         </>

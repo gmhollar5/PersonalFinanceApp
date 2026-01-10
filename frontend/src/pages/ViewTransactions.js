@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 
 // Utility function to format date strings without timezone conversion
 const formatDateSafe = (dateString) => {
@@ -7,11 +7,6 @@ const formatDateSafe = (dateString) => {
   const [year, month, day] = dateString.split('T')[0].split('-');
   const date = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
   return date.toLocaleDateString();
-};
-
-// Utility function to format currency
-const formatCurrency = (amount) => {
-  return `${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 };
 
 // Utility function to format timestamps with timezone abbreviation
@@ -51,6 +46,34 @@ function ViewTransactions({ transactions, fetchTransactions }) {
   const [minAmount, setMinAmount] = useState("");
   const [maxAmount, setMaxAmount] = useState("");
 
+  // Edit states
+  const [editingTransaction, setEditingTransaction] = useState(null);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [categoryOptions, setCategoryOptions] = useState([]);
+
+  // Fetch categories from API on mount
+  useEffect(() => {
+    const fetchCategories = async () => {
+      try {
+        const res = await fetch("/categories");
+        const data = await res.json();
+        setCategoryOptions(data.all || []);
+      } catch (err) {
+        console.error("Error fetching categories:", err);
+        // Fallback to basic categories if API fails
+        setCategoryOptions([
+          "Salary", "Interest", "Refund", "Gift", "Transfer", "Side Income",
+          "Tax Refund", "Other Income", "Dining", "Groceries", "Gas",
+          "Shopping", "Subscriptions", "Utilities", "Rent", "Health & Fitness",
+          "Entertainment", "Travel", "Education", "Credit Card Payment",
+          "Loan Payment", "ATM/Cash", "Fees", "Services", "Internal Transfer",
+          "Car Payment", "Phone", "Student Loan", "Household", "Gifts", "Other"
+        ]);
+      }
+    };
+    fetchCategories();
+  }, []);
+
   // Get unique categories, stores, and tags
   const uniqueCategories = [...new Set(transactions.map((t) => t.category))].sort();
   const uniqueStores = [...new Set(transactions.map((t) => t.store).filter(Boolean))].sort();
@@ -83,6 +106,56 @@ function ViewTransactions({ transactions, fetchTransactions }) {
       console.error(err);
       alert(`Error deleting transaction: ${err.message}`);
     }
+  };
+
+  // Edit transaction
+  const handleEditTransaction = (transaction) => {
+    setEditingTransaction({
+      ...transaction,
+      transaction_date: transaction.transaction_date.split('T')[0] // Format date for input
+    });
+    setShowEditModal(true);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editingTransaction.category || !editingTransaction.store || !editingTransaction.amount) {
+      alert("Please fill in category, store, and amount");
+      return;
+    }
+
+    try {
+      const res = await fetch(`/transactions/${editingTransaction.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: editingTransaction.type,
+          category: editingTransaction.category,
+          store: editingTransaction.store,
+          amount: parseFloat(editingTransaction.amount),
+          description: editingTransaction.description || null,
+          tag: editingTransaction.tag || null,
+          transaction_date: editingTransaction.transaction_date,
+        }),
+      });
+
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.detail || "Error updating transaction");
+      }
+
+      alert("Transaction updated successfully!");
+      setShowEditModal(false);
+      setEditingTransaction(null);
+      fetchTransactions(); // Refresh the list
+    } catch (err) {
+      console.error(err);
+      alert(`Error updating transaction: ${err.message}`);
+    }
+  };
+
+  const handleCancelEdit = () => {
+    setShowEditModal(false);
+    setEditingTransaction(null);
   };
 
   // Filter and sort transactions
@@ -186,11 +259,24 @@ function ViewTransactions({ transactions, fetchTransactions }) {
     marginBottom: "20px",
   };
 
+  const summaryGridStyle = {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+    gap: "20px",
+    marginBottom: "10px",
+  };
+
+  const summaryItemStyle = {
+    textAlign: "center",
+    padding: "15px",
+    borderRadius: "8px",
+    backgroundColor: "#f5f5f5",
+  };
+
   const filterGridStyle = {
     display: "grid",
     gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
     gap: "15px",
-    marginBottom: "20px",
   };
 
   const filterGroupStyle = {
@@ -199,133 +285,140 @@ function ViewTransactions({ transactions, fetchTransactions }) {
   };
 
   const labelStyle = {
-    fontWeight: "bold",
     marginBottom: "5px",
     fontSize: "14px",
+    fontWeight: "500",
     color: "#333",
   };
 
   const inputStyle = {
     padding: "8px",
-    border: "1px solid #ddd",
     borderRadius: "5px",
+    border: "1px solid #ddd",
     fontSize: "14px",
   };
 
   const buttonRowStyle = {
     display: "flex",
-    gap: "10px",
-    marginTop: "10px",
+    justifyContent: "flex-end",
+    marginTop: "15px",
   };
 
   const clearButtonStyle = {
-    backgroundColor: "#ff9800",
+    padding: "8px 16px",
+    backgroundColor: "#666",
     color: "white",
     border: "none",
-    padding: "10px 20px",
     borderRadius: "5px",
     cursor: "pointer",
-    fontWeight: "bold",
+    fontSize: "14px",
   };
-
-  const summaryBoxStyle = {
-    display: "grid",
-    gridTemplateColumns: "repeat(3, 1fr)",
-    gap: "20px",
-    marginBottom: "20px",
-  };
-
-  const summaryItemStyle = (color) => ({
-    backgroundColor: color,
-    padding: "20px",
-    borderRadius: "8px",
-    color: "white",
-    textAlign: "center",
-  });
 
   const tableStyle = {
     width: "100%",
     borderCollapse: "collapse",
+    fontSize: "14px",
   };
 
   const thStyle = {
-    backgroundColor: "#1a1a2e",
-    color: "white",
+    backgroundColor: "#f5f5f5",
     padding: "12px",
     textAlign: "left",
-    fontWeight: "bold",
+    fontWeight: "600",
+    borderBottom: "2px solid #ddd",
+    whiteSpace: "nowrap",
   };
 
   const tdStyle = {
     padding: "12px",
     borderBottom: "1px solid #eee",
+    verticalAlign: "middle",
   };
 
   const rowStyle = (type) => ({
-    backgroundColor: type === "income" ? "#e8f5e9" : "#ffebee",
+    backgroundColor: type === "income" ? "#f0f9ff" : "#fff5f5",
   });
 
-  const deleteButtonStyle = {
-    backgroundColor: "#f44336",
-    color: "white",
-    border: "none",
-    padding: "6px 12px",
-    borderRadius: "4px",
-    cursor: "pointer",
-    fontSize: "12px",
-    fontWeight: "bold",
-  };
-
-  const badgeStyle = {
-    display: "inline-block",
+  const tagBadgeStyle = {
+    backgroundColor: "#e3f2fd",
+    color: "#1976d2",
     padding: "3px 8px",
     borderRadius: "12px",
-    fontSize: "11px",
-    fontWeight: "bold",
-    marginLeft: "8px",
+    fontSize: "12px",
+    fontWeight: "500",
   };
 
   const bulkBadgeStyle = {
-    ...badgeStyle,
-    backgroundColor: "#2196F3",
-    color: "white",
+    backgroundColor: "#f3e5f5",
+    color: "#7b1fa2",
+    padding: "3px 8px",
+    borderRadius: "12px",
+    fontSize: "12px",
+    fontWeight: "500",
   };
 
   const manualBadgeStyle = {
-    ...badgeStyle,
-    backgroundColor: "#9E9E9E",
-    color: "white",
+    backgroundColor: "#e8f5e9",
+    color: "#388e3c",
+    padding: "3px 8px",
+    borderRadius: "12px",
+    fontSize: "12px",
+    fontWeight: "500",
   };
 
-  const tagBadgeStyle = {
-    ...badgeStyle,
-    backgroundColor: "#9C27B0",
+  const deleteButtonStyle = {
+    padding: "6px 12px",
+    backgroundColor: "#f44336",
     color: "white",
+    border: "none",
+    borderRadius: "5px",
+    cursor: "pointer",
+    fontSize: "13px",
+  };
+
+  const editButtonStyle = {
+    padding: "6px 12px",
+    backgroundColor: "#4CAF50",
+    color: "white",
+    border: "none",
+    borderRadius: "5px",
+    cursor: "pointer",
+    fontSize: "13px",
+    marginRight: "5px",
   };
 
   return (
     <div style={containerStyle}>
-      <h2>View Transactions</h2>
+      <h2 style={{ marginTop: 0 }}>View Transactions</h2>
 
       {/* Summary */}
-      <div style={summaryBoxStyle}>
-        <div style={summaryItemStyle("#4CAF50")}>
-          <h3>Total Income</h3>
-          <p style={{ fontSize: "24px", margin: "10px 0" }}>
-            ${formatCurrency(totalIncome)}
-          </p>
-        </div>
-        <div style={summaryItemStyle("#f44336")}>
-          <h3>Total Expenses</h3>
-          <p style={{ fontSize: "24px", margin: "10px 0" }}>
-            ${formatCurrency(totalExpenses)}
-          </p>
-        </div>
-        <div style={summaryItemStyle("#2196F3")}>
-          <h3>Net Balance</h3>
-          <p style={{ fontSize: "24px", margin: "10px 0" }}>
-            ${formatCurrency(netBalance)}
-          </p>
+      <div style={cardStyle}>
+        <h3 style={{ marginTop: 0 }}>Summary</h3>
+        <div style={summaryGridStyle}>
+          <div style={{ ...summaryItemStyle, backgroundColor: "#e8f5e9" }}>
+            <div style={{ fontSize: "24px", fontWeight: "bold", color: "#2e7d32" }}>
+              ${totalIncome.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </div>
+            <div style={{ fontSize: "14px", color: "#666", marginTop: "5px" }}>
+              Total Income
+            </div>
+          </div>
+          <div style={{ ...summaryItemStyle, backgroundColor: "#ffebee" }}>
+            <div style={{ fontSize: "24px", fontWeight: "bold", color: "#c62828" }}>
+              ${totalExpenses.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </div>
+            <div style={{ fontSize: "14px", color: "#666", marginTop: "5px" }}>
+              Total Expenses
+            </div>
+          </div>
+          <div style={{ ...summaryItemStyle, backgroundColor: netBalance >= 0 ? "#e3f2fd" : "#fff3e0" }}>
+            <div style={{ fontSize: "24px", fontWeight: "bold", color: netBalance >= 0 ? "#1565c0" : "#e65100" }}>
+              ${netBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </div>
+            <div style={{ fontSize: "14px", color: "#666", marginTop: "5px" }}>
+              Net Balance
+            </div>
+          </div>
         </div>
       </div>
 
@@ -398,13 +491,13 @@ function ViewTransactions({ transactions, fetchTransactions }) {
             </select>
           </div>
 
-          {/* Description */}
+          {/* Description Search */}
           <div style={filterGroupStyle}>
-            <label style={labelStyle}>Description</label>
+            <label style={labelStyle}>Description Search</label>
             <input
               type="text"
               style={inputStyle}
-              placeholder="Search description..."
+              placeholder="Search descriptions..."
               value={descriptionSearch}
               onChange={(e) => setDescriptionSearch(e.target.value)}
             />
@@ -438,7 +531,7 @@ function ViewTransactions({ transactions, fetchTransactions }) {
             <input
               type="number"
               style={inputStyle}
-              placeholder={`Min: $${formatCurrency(globalMinAmount)}`}
+              placeholder={`Min: $${globalMinAmount.toFixed(2)}`}
               value={minAmount}
               onChange={(e) => setMinAmount(e.target.value)}
             />
@@ -450,7 +543,7 @@ function ViewTransactions({ transactions, fetchTransactions }) {
             <input
               type="number"
               style={inputStyle}
-              placeholder={`Max: $${formatCurrency(globalMaxAmount)}`}
+              placeholder={`Max: $${globalMaxAmount.toFixed(2)}`}
               value={maxAmount}
               onChange={(e) => setMaxAmount(e.target.value)}
             />
@@ -501,7 +594,7 @@ function ViewTransactions({ transactions, fetchTransactions }) {
                     </td>
                     <td style={tdStyle}>{t.category}</td>
                     <td style={tdStyle}>{t.store}</td>
-                    <td style={tdStyle}>${formatCurrency(t.amount)}</td>
+                    <td style={tdStyle}>${t.amount.toFixed(2)}</td>
                     <td style={tdStyle}>{t.description || "-"}</td>
                     <td style={tdStyle}>
                       {t.tag ? (
@@ -522,6 +615,12 @@ function ViewTransactions({ transactions, fetchTransactions }) {
                     </td>
                     <td style={tdStyle}>
                       <button
+                        onClick={() => handleEditTransaction(t)}
+                        style={editButtonStyle}
+                      >
+                        Edit
+                      </button>
+                      <button
                         onClick={() => deleteTransaction(t.id)}
                         style={deleteButtonStyle}
                       >
@@ -535,6 +634,220 @@ function ViewTransactions({ transactions, fetchTransactions }) {
           </div>
         )}
       </div>
+
+      {/* Edit Modal */}
+      {showEditModal && editingTransaction && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: "rgba(0, 0, 0, 0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+          }}
+          onClick={(e) => e.target === e.currentTarget && handleCancelEdit()}
+        >
+          <div
+            style={{
+              backgroundColor: "white",
+              padding: "30px",
+              borderRadius: "10px",
+              width: "90%",
+              maxWidth: "600px",
+              maxHeight: "90vh",
+              overflowY: "auto",
+            }}
+          >
+            <h2 style={{ marginTop: 0 }}>Edit Transaction</h2>
+
+            {/* Type */}
+            <div style={{ marginBottom: "15px" }}>
+              <label style={{ display: "block", marginBottom: "5px", fontWeight: "bold" }}>
+                Type
+              </label>
+              <select
+                value={editingTransaction.type}
+                onChange={(e) =>
+                  setEditingTransaction({ ...editingTransaction, type: e.target.value })
+                }
+                style={{
+                  width: "100%",
+                  padding: "8px",
+                  borderRadius: "5px",
+                  border: "1px solid #ddd",
+                }}
+              >
+                <option value="income">Income</option>
+                <option value="expense">Expense</option>
+              </select>
+            </div>
+
+            {/* Category */}
+            <div style={{ marginBottom: "15px" }}>
+              <label style={{ display: "block", marginBottom: "5px", fontWeight: "bold" }}>
+                Category *
+              </label>
+              <select
+                value={editingTransaction.category}
+                onChange={(e) =>
+                  setEditingTransaction({ ...editingTransaction, category: e.target.value })
+                }
+                style={{
+                  width: "100%",
+                  padding: "8px",
+                  borderRadius: "5px",
+                  border: "1px solid #ddd",
+                }}
+              >
+                <option value="">-- Select --</option>
+                {categoryOptions.map((cat) => (
+                  <option key={cat} value={cat}>
+                    {cat}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Store */}
+            <div style={{ marginBottom: "15px" }}>
+              <label style={{ display: "block", marginBottom: "5px", fontWeight: "bold" }}>
+                Store *
+              </label>
+              <input
+                type="text"
+                value={editingTransaction.store || ""}
+                onChange={(e) =>
+                  setEditingTransaction({ ...editingTransaction, store: e.target.value })
+                }
+                style={{
+                  width: "100%",
+                  padding: "8px",
+                  borderRadius: "5px",
+                  border: "1px solid #ddd",
+                }}
+              />
+            </div>
+
+            {/* Amount */}
+            <div style={{ marginBottom: "15px" }}>
+              <label style={{ display: "block", marginBottom: "5px", fontWeight: "bold" }}>
+                Amount *
+              </label>
+              <input
+                type="number"
+                step="0.01"
+                value={editingTransaction.amount}
+                onChange={(e) =>
+                  setEditingTransaction({ ...editingTransaction, amount: e.target.value })
+                }
+                style={{
+                  width: "100%",
+                  padding: "8px",
+                  borderRadius: "5px",
+                  border: "1px solid #ddd",
+                }}
+              />
+            </div>
+
+            {/* Description */}
+            <div style={{ marginBottom: "15px" }}>
+              <label style={{ display: "block", marginBottom: "5px", fontWeight: "bold" }}>
+                Description
+              </label>
+              <textarea
+                value={editingTransaction.description || ""}
+                onChange={(e) =>
+                  setEditingTransaction({ ...editingTransaction, description: e.target.value })
+                }
+                style={{
+                  width: "100%",
+                  padding: "8px",
+                  borderRadius: "5px",
+                  border: "1px solid #ddd",
+                  minHeight: "60px",
+                }}
+              />
+            </div>
+
+            {/* Tag */}
+            <div style={{ marginBottom: "15px" }}>
+              <label style={{ display: "block", marginBottom: "5px", fontWeight: "bold" }}>
+                Tag
+              </label>
+              <input
+                type="text"
+                value={editingTransaction.tag || ""}
+                onChange={(e) =>
+                  setEditingTransaction({ ...editingTransaction, tag: e.target.value })
+                }
+                style={{
+                  width: "100%",
+                  padding: "8px",
+                  borderRadius: "5px",
+                  border: "1px solid #ddd",
+                }}
+              />
+            </div>
+
+            {/* Transaction Date */}
+            <div style={{ marginBottom: "20px" }}>
+              <label style={{ display: "block", marginBottom: "5px", fontWeight: "bold" }}>
+                Transaction Date *
+              </label>
+              <input
+                type="date"
+                value={editingTransaction.transaction_date}
+                onChange={(e) =>
+                  setEditingTransaction({
+                    ...editingTransaction,
+                    transaction_date: e.target.value,
+                  })
+                }
+                style={{
+                  width: "100%",
+                  padding: "8px",
+                  borderRadius: "5px",
+                  border: "1px solid #ddd",
+                }}
+              />
+            </div>
+
+            {/* Buttons */}
+            <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
+              <button
+                onClick={handleCancelEdit}
+                style={{
+                  padding: "10px 20px",
+                  backgroundColor: "#ccc",
+                  border: "none",
+                  borderRadius: "5px",
+                  cursor: "pointer",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveEdit}
+                style={{
+                  padding: "10px 20px",
+                  backgroundColor: "#4CAF50",
+                  color: "white",
+                  border: "none",
+                  borderRadius: "5px",
+                  cursor: "pointer",
+                }}
+              >
+                Save Changes
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

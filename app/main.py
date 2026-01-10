@@ -311,6 +311,35 @@ def delete_transaction(transaction_id: int, db: Session = Depends(get_db)):
         print(f"❌ Error deleting transaction: {e}")
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
+@app.patch("/transactions/{transaction_id}", response_model=schemas.TransactionOut)
+def update_transaction(transaction_id: int, transaction_update: schemas.TransactionUpdate, db: Session = Depends(get_db)):
+    """Update a transaction"""
+    try:
+        transaction = db.query(models.Transaction).filter(
+            models.Transaction.id == transaction_id
+        ).first()
+        
+        if not transaction:
+            raise HTTPException(status_code=404, detail="Transaction not found")
+        
+        # Update only the fields that were provided
+        update_data = transaction_update.model_dump(exclude_unset=True)
+        for key, value in update_data.items():
+            setattr(transaction, key, value)
+        
+        db.commit()
+        db.refresh(transaction)
+        
+        print(f"✅ Transaction updated: ID {transaction.id}")
+        return transaction
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        print(f"❌ Error updating transaction: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
 # ------------------- CSV Upload & Parsing -------------------
 @app.post("/transactions/csv-preview", response_model=CSVPreviewResponse)
 async def preview_csv_file(file: UploadFile = File(...)):

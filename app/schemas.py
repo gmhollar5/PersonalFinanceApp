@@ -71,6 +71,16 @@ class TransactionCreate(BaseModel):
     upload_session_id: Optional[int] = None
     user_id: int
 
+class TransactionUpdate(BaseModel):
+    """Schema for updating a transaction - all fields optional"""
+    type: Optional[str] = None
+    category: Optional[str] = None
+    store: Optional[str] = None
+    amount: Optional[float] = None
+    description: Optional[str] = None
+    tag: Optional[str] = None
+    transaction_date: Optional[date] = None
+
 class TransactionOut(BaseModel):
     id: int
     type: str
